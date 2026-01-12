@@ -35,7 +35,7 @@ use std::time::Instant;
 use anyhow::Result;
 use tower_governor::{
     governor::GovernorConfigBuilder,
-    key_extractor::SmartIpKeyExtractor,
+    key_extractor::PeerIpKeyExtractor,
     GovernorLayer,
 };
 use crate::cache::QueryCache;
@@ -154,7 +154,7 @@ impl Server {
             GovernorConfigBuilder::default()
                 .per_second(1) // 1 request per second = 60 per minute
                 .burst_size(60) // Allow burst of 60 requests
-                .key_extractor(SmartIpKeyExtractor)
+                .key_extractor(PeerIpKeyExtractor)
                 .finish()
                 .expect("Failed to build governor config")
         );
@@ -201,7 +201,11 @@ impl Server {
         })?;
 
         // Start server with graceful shutdown on signal
-        axum::serve(listener, router)
+        // Using into_make_service_with_connect_info to provide SocketAddr for rate limiting
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>()
+        )
             .with_graceful_shutdown(shutdown_signal())
             .await?;
 
