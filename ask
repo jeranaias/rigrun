@@ -1,0 +1,14 @@
+#!/bin/bash
+# ask - Ultra-simple rigrun query helper
+# Usage: ./ask "your question here"
+
+if [ -z "$1" ]; then
+  echo "Usage: ./ask \"your question here\""
+  exit 1
+fi
+
+QUESTION="$1"
+curl -sX POST localhost:8787/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"local\",\"messages\":[{\"role\":\"user\",\"content\":\"$QUESTION\"}]}" \
+  | jq -r '.choices[0].message.content // .error.message // "Error: no response"'

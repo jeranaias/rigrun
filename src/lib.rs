@@ -16,7 +16,9 @@
 //! - [`stats`] - Cost tracking and savings analytics
 //! - [`cloud`] - Cloud API integration (OpenRouter)
 //! - [`server`] - HTTP server for API compatibility
+//! - [`audit`] - Privacy audit logging for transparency
 
+pub mod audit;
 pub mod cache;
 pub mod cloud;
 pub mod detect;
@@ -63,3 +65,10 @@ pub use stats::{QueryStats, SessionStats, StatsTracker, SavingsSummary};
 pub use cloud::OpenRouterClient;
 pub use server::Server;
 pub use utils::mask_sensitive;
+
+// Re-export audit types
+pub use audit::{
+    AuditEntry, AuditLogger, AuditTier,
+    audit_log_query, audit_log_blocked, is_audit_enabled, set_audit_enabled,
+    init_audit_logger, global_audit_logger,
+};

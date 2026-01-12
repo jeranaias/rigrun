@@ -38,6 +38,7 @@ use tower_governor::{
     key_extractor::PeerIpKeyExtractor,
     GovernorLayer,
 };
+use crate::audit;
 use crate::cache::QueryCache;
 use crate::local::{OllamaClient, Message};
 use crate::router::{route_query, Tier};
@@ -56,6 +57,8 @@ pub struct AppState {
     pub local_model: String,
     /// Query cache for semantic caching.
     pub cache: RwLock<QueryCache>,
+    /// Paranoid mode: block all cloud requests.
+    pub paranoid_mode: bool,
 }
 
 /// Server configuration.
@@ -67,6 +70,8 @@ pub struct ServerConfig {
     pub default_model: String,
     /// Address to bind to (defaults to 127.0.0.1 for security).
     pub bind_address: String,
+    /// Paranoid mode: block all cloud requests.
+    pub paranoid_mode: bool,
 }
 
 /// API server configuration.
@@ -82,6 +87,8 @@ pub struct Server {
     openrouter_key: Option<String>,
     /// Address to bind to (defaults to 127.0.0.1 for security).
     bind_address: String,
+    /// Paranoid mode: block all cloud requests.
+    paranoid_mode: bool,
 }
 
 impl Default for Server {
@@ -100,6 +107,7 @@ impl Server {
             local_model: "qwen2.5-coder:7b".to_string(),
             openrouter_key: None,
             bind_address: "127.0.0.1".to_string(),
+            paranoid_mode: false,
         }
     }
 
@@ -128,6 +136,13 @@ impl Server {
         self
     }
 
+    /// Enable paranoid mode: block all cloud requests.
+    /// When enabled, requests that would go to the cloud return an error instead.
+    pub fn with_paranoid_mode(mut self, enabled: bool) -> Self {
+        self.paranoid_mode = enabled;
+        self
+    }
+
     /// Build the router with all routes.
     pub fn build_router(&self) -> Router {
         // Initialize OpenRouter client with API key from config or environment
@@ -142,11 +157,13 @@ impl Server {
                 port: self.port,
                 default_model: self.default_model.clone(),
                 bind_address: self.bind_address.clone(),
+                paranoid_mode: self.paranoid_mode,
             },
             ollama_client: OllamaClient::new(),
             openrouter_client,
             local_model: self.local_model.clone(),
             cache: RwLock::new(QueryCache::default_persistent()),
+            paranoid_mode: self.paranoid_mode,
         });
 
         // Configure rate limiting: 60 requests per minute per IP
@@ -589,6 +606,16 @@ async fn completions_handler(
             )
         }
         Tier::Cloud => {
+            // PARANOID MODE: Block cloud requests
+            if state.paranoid_mode {
+                tracing::warn!("PARANOID MODE: Blocking cloud request");
+                audit::audit_log_blocked(Tier::Cloud, cache_key);
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    "PARANOID MODE: Cloud requests are blocked. Your data stays local.".to_string(),
+                ));
+            }
+
             // Use OpenRouter auto-router - it picks the best model automatically
             let model = "openrouter/auto";
 
@@ -620,6 +647,16 @@ async fn completions_handler(
             )
         }
         Tier::Haiku | Tier::Sonnet | Tier::Opus => {
+            // PARANOID MODE: Block cloud requests
+            if state.paranoid_mode {
+                tracing::warn!("PARANOID MODE: Blocking {:?} cloud request", tier);
+                audit::audit_log_blocked(tier, cache_key);
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    format!("PARANOID MODE: Cloud requests ({:?}) are blocked. Your data stays local.", tier),
+                ));
+            }
+
             // Map tier to OpenRouter model name (explicit model selection)
             let model = match tier {
                 Tier::Haiku => "anthropic/claude-3-haiku",
@@ -712,6 +749,10 @@ async fn completions_handler(
             stats::global_tracker().get_all_time_stats().total_queries
         );
     }
+
+    // Audit logging: record the query for transparency
+    let cost_usd = actual_tier.calculate_cost(prompt_tokens, completion_tokens) as f64 / 100.0;
+    audit::audit_log_query(actual_tier, cache_key, prompt_tokens, completion_tokens, cost_usd);
 
     let response = ChatCompletionResponse {
         id: format!("chatcmpl-{}", uuid_v4()),
