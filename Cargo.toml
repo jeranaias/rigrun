@@ -1,0 +1,65 @@
+[package]
+name = "rigrun"
+version = "0.1.0"
+edition = "2021"
+description = "Local-first LLM router. Your GPU first, cloud when needed."
+license = "MIT"
+repository = "https://github.com/rigrun/rigrun"
+keywords = ["llm", "ai", "router", "ollama", "gpu"]
+categories = ["command-line-utilities", "web-programming"]
+homepage = "https://github.com/rigrun/rigrun"
+documentation = "https://github.com/rigrun/rigrun"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+
+# Web server
+axum = "0.7"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+
+# CLI parsing
+clap = { version = "4.5", features = ["derive"] }
+
+# Error handling
+anyhow = "1.0"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Config directory
+dirs = "5.0"
+
+# Colored output for CLI
+colored = "2.1"
+
+# Interactive prompts
+inquire = "0.7"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Rate limiting
+tower = "0.4"
+tower_governor = "0.4"
+
+# Ordered map with serde support
+indexmap = { version = "2.0", features = ["serde"] }
+
+# Terminal manipulation for live stats
+crossterm = "0.27"
+
+[[bin]]
+name = "rigrun"
+path = "src/main.rs"
+
+[lib]
+name = "rigrun"
+path = "src/lib.rs"

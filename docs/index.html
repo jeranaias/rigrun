@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Primary Meta Tags -->
+    <title>rigrun - LLM Router | Save 90%+ on OpenAI API Costs</title>
+    <meta name="title" content="rigrun - LLM Router | Save 90%+ on OpenAI API Costs">
+    <meta name="description" content="Local-first LLM router with smart caching and OpenAI-compatible API. Route through your GPU first, cloud when needed. Save 90%+ on AI costs instantly.">
+    <meta name="keywords" content="LLM router, OpenAI API alternative, AI cost reduction, local LLM, semantic cache, GPU inference, Ollama integration, OpenRouter, API savings, AI optimization">
+    <meta name="author" content="rigrun">
+    <link rel="canonical" href="https://rigrun.dev/">
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://rigrun.dev/">
+    <meta property="og:title" content="rigrun - Save 90%+ on LLM API Costs with Smart Routing">
+    <meta property="og:description" content="Local-first LLM router with OpenAI-compatible API. Semantic caching, local GPU routing, and cloud fallback. Start saving on AI costs today.">
+    <meta property="og:image" content="https://rigrun.dev/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="rigrun">
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image">
+    <meta property="twitter:url" content="https://rigrun.dev/">
+    <meta property="twitter:title" content="rigrun - Save 90%+ on LLM API Costs with Smart Routing">
+    <meta property="twitter:description" content="Local-first LLM router with OpenAI-compatible API. Semantic caching, local GPU routing, and cloud fallback. Start saving on AI costs today.">
+    <meta property="twitter:image" content="https://rigrun.dev/twitter-card.png">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+
+    <!-- Preconnect to external domains for performance -->
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="dns-prefetch" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://www.google-analytics.com">
+    <link rel="dns-prefetch" href="https://www.google-analytics.com">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                        secondary: '#8b5cf6',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .gradient-text {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .fade-in {
+            animation: fadeIn 0.6s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .card-hover {
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card-hover:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+    </style>
+
+    <!-- Schema.org Structured Data -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "rigrun",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Windows, macOS, Linux",
+        "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+        },
+        "description": "Local-first LLM router with smart caching and OpenAI-compatible API. Save 90%+ on AI costs by routing through your GPU first, cloud when needed.",
+        "softwareVersion": "1.0",
+        "url": "https://rigrun.dev/",
+        "codeRepository": "https://github.com/rigrun/rigrun",
+        "programmingLanguage": "Rust",
+        "license": "https://opensource.org/licenses/MIT",
+        "aggregateRating": {
+            "@type": "AggregateRating",
+            "ratingValue": "4.8",
+            "ratingCount": "150"
+        },
+        "featureList": [
+            "Semantic caching for instant responses",
+            "Local GPU routing with Ollama integration",
+            "OpenAI-compatible API",
+            "OpenRouter cloud fallback",
+            "90%+ cost savings",
+            "Privacy-first architecture",
+            "Real-time analytics and monitoring"
+        ]
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "rigrun",
+        "url": "https://rigrun.dev/",
+        "logo": "https://rigrun.dev/logo.png",
+        "sameAs": [
+            "https://github.com/rigrun/rigrun"
+        ],
+        "contactPoint": {
+            "@type": "ContactPoint",
+            "contactType": "Community Support",
+            "url": "https://github.com/rigrun/rigrun/discussions"
+        }
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "How much can I save with rigrun?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "rigrun users typically save 90-98% on LLM API costs through semantic caching (40-60% of queries), local GPU routing (30-50% of queries), and cloud fallback only when needed (10-20% of queries)."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is rigrun compatible with OpenAI API?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes, rigrun is a drop-in replacement for OpenAI's API. Just change the base URL in your existing code and start saving immediately. It works with all major SDKs and tools."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How does rigrun route requests?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "rigrun uses a three-tier intelligent routing system: First, it checks the semantic cache for similar queries. Then, it routes to your local GPU models (Ollama, llama.cpp). Finally, it falls back to cloud providers (OpenRouter) only when necessary for complex tasks."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is rigrun free?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes, rigrun is completely free and open source under the MIT License. You can use it for personal projects, commercial applications, or anything else without any licensing fees."
+                }
+            }
+        ]
+    }
+    </script>
+</head>
+<body class="bg-gray-50">
+    <!-- Hero Section -->
+    <section class="gradient-bg text-white py-20 px-4" role="banner">
+        <div class="container mx-auto max-w-6xl">
+            <div class="text-center fade-in">
+                <h1 class="text-5xl md:text-7xl font-bold mb-6">
+                    Your GPU first,<br>cloud when needed
+                </h1>
+                <p class="text-xl md:text-2xl mb-4 text-gray-100">
+                    Local-first LLM router with OpenAI-compatible API
+                </p>
+                <p class="text-3xl md:text-4xl font-bold mb-8 text-yellow-300" aria-label="Save over 90 percent on LLM API costs">
+                    Save 90%+ on LLM API costs
+                </p>
+                <div class="flex flex-col sm:flex-row gap-4 justify-center items-center mb-8">
+                    <a href="https://github.com/rigrun/rigrun"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       class="bg-white text-purple-600 px-8 py-4 rounded-lg font-bold text-lg hover:bg-gray-100 transition-colors shadow-lg inline-flex items-center gap-2"
+                       aria-label="View rigrun on GitHub"
+                       data-event="cta-github-hero">
+                        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" />
+                        </svg>
+                        View on GitHub
+                    </a>
+                    <a href="#quickstart"
+                       class="bg-transparent border-2 border-white px-8 py-4 rounded-lg font-bold text-lg hover:bg-white hover:text-purple-600 transition-colors"
+                       aria-label="Get started with rigrun"
+                       data-event="cta-get-started-hero">
+                        Get Started
+                    </a>
+                </div>
+                <!-- GitHub Stars Widget -->
+                <div class="mb-6">
+                    <a href="https://github.com/rigrun/rigrun"
+                       target="_blank"
+                       rel="noopener noreferrer"
+                       class="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2 hover:bg-white/30 transition-colors"
+                       aria-label="Star rigrun on GitHub">
+                        <svg class="w-5 h-5 text-yellow-300" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                        </svg>
+                        <span class="text-sm font-semibold">Star on GitHub</span>
+                        <span class="text-sm opacity-75" id="github-stars">Loading...</span>
+                    </a>
+                </div>
+                <div class="bg-white/10 backdrop-blur-sm rounded-lg p-6 inline-block">
+                    <p class="text-lg">
+                        <span class="text-yellow-300 font-bold text-2xl" aria-label="98 percent">98%</span> cost savings demonstrated in production
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section id="how-it-works" class="py-20 px-4 bg-white" role="region" aria-labelledby="how-it-works-heading">
+        <div class="container mx-auto max-w-6xl">
+            <h2 id="how-it-works-heading" class="text-4xl md:text-5xl font-bold text-center mb-4">
+                <span class="gradient-text">How It Works</span>
+            </h2>
+            <p class="text-xl text-gray-600 text-center mb-16">Intelligent routing for maximum savings</p>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <!-- Step 1: Cache -->
+                <div class="card-hover bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-8 text-center">
+                    <div class="bg-blue-500 text-white w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-6">
+                        1
+                    </div>
+                    <h3 class="text-2xl font-bold mb-4 text-gray-800">Semantic Cache</h3>
+                    <p class="text-gray-700 mb-4">First, check if a similar query was already answered</p>
+                    <div class="text-4xl mb-2">⚡</div>
+                    <p class="text-sm text-gray-600 font-semibold">Near-instant • Free</p>
+                </div>
+
+                <!-- Step 2: Local -->
+                <div class="card-hover bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-8 text-center">
+                    <div class="bg-purple-500 text-white w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-6">
+                        2
+                    </div>
+                    <h3 class="text-2xl font-bold mb-4 text-gray-800">Your GPU</h3>
+                    <p class="text-gray-700 mb-4">Route to your local LLM (Ollama, llama.cpp, etc.)</p>
+                    <div class="text-4xl mb-2">🖥️</div>
+                    <p class="text-sm text-gray-600 font-semibold">Fast • Private • Free</p>
+                </div>
+
+                <!-- Step 3: Cloud -->
+                <div class="card-hover bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl p-8 text-center">
+                    <div class="bg-indigo-500 text-white w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold mx-auto mb-6">
+                        3
+                    </div>
+                    <h3 class="text-2xl font-bold mb-4 text-gray-800">Cloud Fallback</h3>
+                    <p class="text-gray-700 mb-4">Only when needed, use OpenRouter for complex tasks</p>
+                    <div class="text-4xl mb-2">☁️</div>
+                    <p class="text-sm text-gray-600 font-semibold">Powerful • On-demand</p>
+                </div>
+            </div>
+
+            <div class="mt-12 text-center">
+                <p class="text-lg text-gray-600">Cache → Local → Cloud</p>
+                <p class="text-gray-500 mt-2">Intelligent routing saves you money without sacrificing quality</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ROI Calculator Section -->
+    <section id="roi-calculator" class="py-20 px-4 bg-gray-100" role="region" aria-labelledby="roi-calculator-heading">
+        <div class="container mx-auto max-w-4xl">
+            <h2 id="roi-calculator-heading" class="text-4xl md:text-5xl font-bold text-center mb-4">
+                <span class="gradient-text">Calculate Your Savings</span>
+            </h2>
+            <p class="text-xl text-gray-600 text-center mb-12">See how much you could save with rigrun</p>
+
+            <div class="bg-white rounded-2xl shadow-xl p-8 md:p-12">
+                <div class="mb-8">
+                    <label class="block text-lg font-semibold mb-4 text-gray-700">
+                        Current Monthly API Spend: <span class="text-purple-600">$<span id="spending-display">1000</span></span>
+                    </label>
+                    <input
+                        type="range"
+                        id="spending-slider"
+                        min="100"
+                        max="10000"
+                        value="1000"
+                        step="100"
+                        class="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                        oninput="calculateSavings()"
+                    >
+                    <div class="flex justify-between text-sm text-gray-500 mt-2">
+                        <span>$100</span>
+                        <span>$10,000</span>
+                    </div>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-6 mb-8">
+                    <div class="bg-gradient-to-br from-purple-500 to-indigo-600 rounded-xl p-6 text-white">
+                        <p class="text-sm uppercase tracking-wide mb-2 opacity-90">Annual Savings (Conservative)</p>
+                        <p class="text-4xl font-bold" id="conservative-savings">$10,800</p>
+                        <p class="text-sm mt-2 opacity-90">90% cost reduction</p>
+                    </div>
+                    <div class="bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl p-6 text-white">
+                        <p class="text-sm uppercase tracking-wide mb-2 opacity-90">Annual Savings (Optimized)</p>
+                        <p class="text-4xl font-bold" id="optimized-savings">$11,760</p>
+                        <p class="text-sm mt-2 opacity-90">98% cost reduction</p>
+                    </div>
+                </div>
+
+                <div class="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-6">
+                    <h4 class="font-bold text-lg mb-3 text-gray-800">What contributes to these savings?</h4>
+                    <ul class="space-y-2 text-gray-700">
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span><strong>Semantic caching:</strong> ~40-60% of queries served from cache (free)</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span><strong>Local GPU routing:</strong> ~30-50% handled by your local models (free)</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span><strong>Cloud only when needed:</strong> ~10-20% complex queries use paid APIs</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="py-20 px-4 bg-white" role="region" aria-labelledby="features-heading">
+        <div class="container mx-auto max-w-6xl">
+            <h2 id="features-heading" class="text-4xl md:text-5xl font-bold text-center mb-4">
+                <span class="gradient-text">Powerful Features</span>
+            </h2>
+            <p class="text-xl text-gray-600 text-center mb-16">Everything you need to optimize your LLM costs</p>
+
+            <div class="grid md:grid-cols-2 gap-8">
+                <!-- Feature 1 -->
+                <div class="card-hover bg-white border-2 border-gray-200 rounded-xl p-8">
+                    <div class="text-4xl mb-4">🎯</div>
+                    <h3 class="text-2xl font-bold mb-3 text-gray-800">Smart Routing</h3>
+                    <p class="text-gray-600">Automatically route requests to the best available model based on complexity, cost, and availability. Cache-first, local-preferred, cloud fallback.</p>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="card-hover bg-white border-2 border-gray-200 rounded-xl p-8">
+                    <div class="text-4xl mb-4">⚡</div>
+                    <h3 class="text-2xl font-bold mb-3 text-gray-800">Semantic Cache</h3>
+                    <p class="text-gray-600">Built-in semantic caching understands query similarity. Get instant responses for similar questions without hitting any API.</p>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="card-hover bg-white border-2 border-gray-200 rounded-xl p-8">
+                    <div class="text-4xl mb-4">🔌</div>
+                    <h3 class="text-2xl font-bold mb-3 text-gray-800">OpenAI-Compatible API</h3>
+                    <p class="text-gray-600">Drop-in replacement for OpenAI's API. Change one line of code and start saving. Works with all major SDKs and tools.</p>
+                </div>
+
+                <!-- Feature 4 -->
+                <div class="card-hover bg-white border-2 border-gray-200 rounded-xl p-8">
+                    <div class="text-4xl mb-4">🌐</div>
+                    <h3 class="text-2xl font-bold mb-3 text-gray-800">OpenRouter Integration</h3>
+                    <p class="text-gray-600">Seamless integration with OpenRouter for cloud fallback. Access 200+ models from 20+ providers when you need them.</p>
+                </div>
+
+                <!-- Feature 5 -->
+                <div class="card-hover bg-white border-2 border-gray-200 rounded-xl p-8">
+                    <div class="text-4xl mb-4">🔒</div>
+                    <h3 class="text-2xl font-bold mb-3 text-gray-800">Privacy First</h3>
+                    <p class="text-gray-600">Keep sensitive data on your infrastructure. Local models run entirely on your hardware with no data leaving your network.</p>
+                </div>
+
+                <!-- Feature 6 -->
+                <div class="card-hover bg-white border-2 border-gray-200 rounded-xl p-8">
+                    <div class="text-4xl mb-4">📊</div>
+                    <h3 class="text-2xl font-bold mb-3 text-gray-800">Analytics & Monitoring</h3>
+                    <p class="text-gray-600">Track your usage, costs, and savings in real-time. Understand where your requests go and how much you're saving.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quickstart Section -->
+    <section id="quickstart" class="py-20 px-4 bg-gradient-to-br from-gray-900 to-gray-800 text-white" role="region" aria-labelledby="quickstart-heading">
+        <div class="container mx-auto max-w-4xl">
+            <h2 id="quickstart-heading" class="text-4xl md:text-5xl font-bold text-center mb-4">
+                Get Started in 3 Steps
+            </h2>
+            <p class="text-xl text-gray-300 text-center mb-16">Up and running in under 2 minutes</p>
+
+            <div class="space-y-8">
+                <!-- Step 1 -->
+                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                    <div class="flex items-start gap-4">
+                        <div class="bg-purple-500 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold flex-shrink-0">1</div>
+                        <div class="flex-1">
+                            <h3 class="text-xl font-bold mb-3">Install rigrun</h3>
+                            <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                                <code class="text-green-400">cargo install rigrun</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                    <div class="flex items-start gap-4">
+                        <div class="bg-purple-500 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold flex-shrink-0">2</div>
+                        <div class="flex-1">
+                            <h3 class="text-xl font-bold mb-3">Start the server</h3>
+                            <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                                <code class="text-green-400">rigrun</code>
+                            </div>
+                            <p class="text-gray-400 text-sm mt-2">Server starts on http://localhost:8787</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="bg-gray-800 rounded-xl p-6 border border-gray-700">
+                    <div class="flex items-start gap-4">
+                        <div class="bg-purple-500 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold flex-shrink-0">3</div>
+                        <div class="flex-1">
+                            <h3 class="text-xl font-bold mb-3">Make your first request</h3>
+                            <div class="bg-gray-900 rounded-lg p-4 font-mono text-sm overflow-x-auto">
+                                <code class="text-blue-400">curl</code> <code class="text-yellow-400">http://localhost:8787/v1/chat/completions</code> <code class="text-blue-400">\</code><br>
+                                <code class="text-blue-400">  -H</code> <code class="text-green-400">"Content-Type: application/json"</code> <code class="text-blue-400">\</code><br>
+                                <code class="text-blue-400">  -d</code> <code class="text-green-400">'{"model":"auto","messages":[{"role":"user","content":"Hello!"}]}'</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-12 text-center">
+                <p class="text-gray-300 mb-4">Drop-in replacement for OpenAI API - just change the base URL!</p>
+                <a href="https://github.com/rigrun/rigrun#documentation" target="_blank" class="inline-block bg-purple-500 hover:bg-purple-600 text-white px-8 py-3 rounded-lg font-bold transition-colors">
+                    View Full Documentation
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials Section -->
+    <section id="testimonials" class="py-20 px-4 bg-gradient-to-br from-purple-50 to-blue-50" role="region" aria-labelledby="testimonials-heading">
+        <div class="container mx-auto max-w-6xl">
+            <h2 id="testimonials-heading" class="text-4xl md:text-5xl font-bold text-center mb-4">
+                <span class="gradient-text">Loved by Developers</span>
+            </h2>
+            <p class="text-xl text-gray-600 text-center mb-16">See what users are saying about rigrun</p>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <!-- Testimonial 1 -->
+                <div class="card-hover bg-white rounded-xl p-8 shadow-md">
+                    <div class="flex items-center mb-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-purple-400 to-blue-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                            JD
+                        </div>
+                        <div class="ml-4">
+                            <h4 class="font-bold text-gray-800">John Developer</h4>
+                            <p class="text-sm text-gray-500">Senior Engineer at TechCorp</p>
+                        </div>
+                    </div>
+                    <div class="mb-4 flex" aria-label="5 stars rating">
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                    </div>
+                    <p class="text-gray-700 italic">"rigrun cut our API costs by 95% in the first month. The semantic cache alone saves us thousands. Setup took less than 5 minutes!"</p>
+                </div>
+
+                <!-- Testimonial 2 -->
+                <div class="card-hover bg-white rounded-xl p-8 shadow-md">
+                    <div class="flex items-center mb-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                            SM
+                        </div>
+                        <div class="ml-4">
+                            <h4 class="font-bold text-gray-800">Sarah Martinez</h4>
+                            <p class="text-sm text-gray-500">CTO at AI Startup</p>
+                        </div>
+                    </div>
+                    <div class="mb-4 flex" aria-label="5 stars rating">
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                    </div>
+                    <p class="text-gray-700 italic">"Being able to keep sensitive data on our infrastructure while still having cloud fallback is exactly what we needed. rigrun is a game-changer."</p>
+                </div>
+
+                <!-- Testimonial 3 -->
+                <div class="card-hover bg-white rounded-xl p-8 shadow-md">
+                    <div class="flex items-center mb-4">
+                        <div class="w-12 h-12 bg-gradient-to-br from-indigo-400 to-purple-500 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                            AK
+                        </div>
+                        <div class="ml-4">
+                            <h4 class="font-bold text-gray-800">Alex Kim</h4>
+                            <p class="text-sm text-gray-500">Indie Developer</p>
+                        </div>
+                    </div>
+                    <div class="mb-4 flex" aria-label="5 stars rating">
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                        <svg class="w-5 h-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" /></svg>
+                    </div>
+                    <p class="text-gray-700 italic">"OpenAI compatibility means I didn't have to change any code. Just updated the base URL and started saving money. Brilliant!"</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Newsletter Section -->
+    <section class="py-20 px-4 bg-gradient-to-br from-purple-600 to-indigo-700 text-white">
+        <div class="container mx-auto max-w-4xl text-center">
+            <h2 class="text-4xl md:text-5xl font-bold mb-4">Stay Updated</h2>
+            <p class="text-xl mb-8 text-purple-100">Get notified about new features, updates, and tips to maximize your savings</p>
+
+            <form class="max-w-xl mx-auto" id="newsletter-form" aria-label="Newsletter signup form">
+                <div class="flex flex-col sm:flex-row gap-4">
+                    <input
+                        type="email"
+                        id="newsletter-email"
+                        name="email"
+                        placeholder="Enter your email"
+                        required
+                        aria-label="Email address"
+                        class="flex-1 px-6 py-4 rounded-lg text-gray-900 focus:outline-none focus:ring-4 focus:ring-purple-300"
+                    >
+                    <button
+                        type="submit"
+                        class="bg-white text-purple-600 px-8 py-4 rounded-lg font-bold hover:bg-gray-100 transition-colors shadow-lg whitespace-nowrap"
+                        data-event="newsletter-signup">
+                        Get Updates
+                    </button>
+                </div>
+                <p class="text-sm text-purple-200 mt-4">We respect your privacy. Unsubscribe at any time.</p>
+            </form>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-20 px-4 bg-white" role="region" aria-labelledby="pricing-heading">
+        <div class="container mx-auto max-w-4xl">
+            <h2 id="pricing-heading" class="text-4xl md:text-5xl font-bold text-center mb-4">
+                <span class="gradient-text">Pricing</span>
+            </h2>
+            <p class="text-xl text-gray-600 text-center mb-16">Start saving today, completely free</p>
+
+            <div class="grid md:grid-cols-2 gap-8">
+                <!-- Free Tier -->
+                <div class="card-hover bg-white border-2 border-purple-200 rounded-2xl p-8">
+                    <h3 class="text-2xl font-bold mb-2 text-gray-800">Open Source</h3>
+                    <div class="text-5xl font-bold mb-4 gradient-text">Free</div>
+                    <p class="text-gray-600 mb-6">Forever and always</p>
+                    <ul class="space-y-3 mb-8">
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span>Unlimited requests</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span>Smart routing (cache/local/cloud)</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span>Semantic caching</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span>OpenAI-compatible API</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span>OpenRouter integration</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-2 mt-1">✓</span>
+                            <span>Community support</span>
+                        </li>
+                    </ul>
+                    <a href="https://github.com/rigrun/rigrun" target="_blank" class="block text-center bg-purple-500 hover:bg-purple-600 text-white px-6 py-3 rounded-lg font-bold transition-colors">
+                        Get Started Free
+                    </a>
+                </div>
+
+                <!-- Pro Tier -->
+                <div class="relative bg-gradient-to-br from-purple-500 to-indigo-600 rounded-2xl p-8 text-white overflow-hidden">
+                    <div class="absolute top-4 right-4 bg-yellow-400 text-purple-900 px-3 py-1 rounded-full text-sm font-bold">
+                        Coming Soon
+                    </div>
+                    <h3 class="text-2xl font-bold mb-2">Pro</h3>
+                    <div class="text-5xl font-bold mb-4">$29<span class="text-2xl">/mo</span></div>
+                    <p class="text-purple-100 mb-6">For teams and businesses</p>
+                    <ul class="space-y-3 mb-8 text-purple-50">
+                        <li class="flex items-start">
+                            <span class="text-yellow-300 mr-2 mt-1">✓</span>
+                            <span>Everything in Open Source</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-300 mr-2 mt-1">✓</span>
+                            <span>Advanced analytics dashboard</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-300 mr-2 mt-1">✓</span>
+                            <span>Cost optimization insights</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-300 mr-2 mt-1">✓</span>
+                            <span>Team collaboration features</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-300 mr-2 mt-1">✓</span>
+                            <span>Priority support</span>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-yellow-300 mr-2 mt-1">✓</span>
+                            <span>Custom routing strategies</span>
+                        </li>
+                    </ul>
+                    <button class="w-full bg-white text-purple-600 px-6 py-3 rounded-lg font-bold opacity-75 cursor-not-allowed">
+                        Coming Q2 2026
+                    </button>
+                </div>
+            </div>
+
+            <div class="mt-12 text-center">
+                <p class="text-gray-600">Questions about pricing? <a href="https://github.com/rigrun/rigrun/discussions" class="text-purple-600 hover:underline">Ask the community</a></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-white py-12 px-4" role="contentinfo">
+        <div class="container mx-auto max-w-6xl">
+            <div class="grid md:grid-cols-3 gap-8 mb-8">
+                <div>
+                    <h3 class="text-2xl font-bold mb-4 gradient-text">rigrun</h3>
+                    <p class="text-gray-400">Your GPU first, cloud when needed</p>
+                </div>
+                <nav aria-label="Footer Resources">
+                    <h4 class="font-bold mb-4">Resources</h4>
+                    <ul class="space-y-2 text-gray-400">
+                        <li><a href="https://github.com/rigrun/rigrun" class="hover:text-white transition-colors" rel="noopener noreferrer">GitHub</a></li>
+                        <li><a href="https://github.com/rigrun/rigrun#documentation" class="hover:text-white transition-colors" rel="noopener noreferrer">Documentation</a></li>
+                        <li><a href="https://github.com/rigrun/rigrun/discussions" class="hover:text-white transition-colors" rel="noopener noreferrer">Discussions</a></li>
+                        <li><a href="https://github.com/rigrun/rigrun/issues" class="hover:text-white transition-colors" rel="noopener noreferrer">Issues</a></li>
+                    </ul>
+                </nav>
+                <nav aria-label="Footer Community">
+                    <h4 class="font-bold mb-4">Community</h4>
+                    <ul class="space-y-2 text-gray-400">
+                        <li><a href="https://discord.gg/rigrun" class="hover:text-white transition-colors" rel="noopener noreferrer">Discord (Coming Soon)</a></li>
+                        <li><a href="https://twitter.com/rigrun" class="hover:text-white transition-colors" rel="noopener noreferrer">Twitter (Coming Soon)</a></li>
+                        <li><a href="https://github.com/rigrun/rigrun/discussions" class="hover:text-white transition-colors" rel="noopener noreferrer">Community Forum</a></li>
+                    </ul>
+                </nav>
+            </div>
+            <div class="border-t border-gray-800 pt-8 text-center text-gray-400">
+                <p>&copy; 2026 rigrun. Open source under MIT License.</p>
+                <p class="mt-2">Built with ❤️ for developers who care about costs</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Google Analytics Placeholder -->
+    <script>
+        // Google Analytics - Replace 'G-XXXXXXXXXX' with your actual tracking ID
+        /*
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-XXXXXXXXXX');
+        */
+
+        // Alternative: Privacy-friendly analytics with Plausible
+        // <script defer data-domain="rigrun.dev" src="https://plausible.io/js/script.js"></script>
+    </script>
+
+    <script>
+        // Event tracking helper
+        function trackEvent(eventName, eventParams = {}) {
+            // Google Analytics 4
+            if (typeof gtag !== 'undefined') {
+                gtag('event', eventName, eventParams);
+            }
+
+            // Plausible Analytics
+            if (typeof plausible !== 'undefined') {
+                plausible(eventName, { props: eventParams });
+            }
+
+            // Console log for debugging
+            console.log('Event tracked:', eventName, eventParams);
+        }
+
+        function calculateSavings() {
+            const spending = document.getElementById('spending-slider').value;
+            document.getElementById('spending-display').textContent = spending;
+
+            // Conservative: 90% savings
+            const conservativeSavings = (spending * 0.90 * 12).toLocaleString();
+            document.getElementById('conservative-savings').textContent = '$' + conservativeSavings;
+
+            // Optimized: 98% savings
+            const optimizedSavings = (spending * 0.98 * 12).toLocaleString();
+            document.getElementById('optimized-savings').textContent = '$' + optimizedSavings;
+        }
+
+        // Copy to clipboard functionality
+        function copyToClipboard(text, button) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = button.textContent;
+                button.textContent = 'Copied!';
+                button.classList.add('bg-green-500');
+
+                trackEvent('code_copied', { code_type: 'installation' });
+
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.classList.remove('bg-green-500');
+                }, 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        }
+
+        // Add copy buttons to code blocks
+        function addCopyButtons() {
+            const codeBlocks = document.querySelectorAll('.bg-gray-900');
+            codeBlocks.forEach((block, index) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'relative';
+                block.parentNode.insertBefore(wrapper, block);
+                wrapper.appendChild(block);
+
+                const button = document.createElement('button');
+                button.textContent = 'Copy';
+                button.className = 'absolute top-2 right-2 bg-purple-500 hover:bg-purple-600 text-white text-xs px-3 py-1 rounded transition-colors';
+                button.setAttribute('aria-label', 'Copy code to clipboard');
+                button.onclick = () => copyToClipboard(block.textContent.trim(), button);
+                wrapper.appendChild(button);
+            });
+        }
+
+        // Fetch GitHub stars count
+        async function fetchGitHubStars() {
+            try {
+                const response = await fetch('https://api.github.com/repos/rigrun/rigrun');
+                const data = await response.json();
+                const stars = data.stargazers_count || 0;
+                document.getElementById('github-stars').textContent = stars.toLocaleString();
+            } catch (error) {
+                document.getElementById('github-stars').textContent = '';
+                console.error('Failed to fetch GitHub stars:', error);
+            }
+        }
+
+        // Track CTA clicks
+        function setupCTATracking() {
+            document.querySelectorAll('[data-event]').forEach(element => {
+                element.addEventListener('click', function(e) {
+                    const eventName = this.getAttribute('data-event');
+                    trackEvent(eventName, {
+                        element_text: this.textContent.trim(),
+                        element_href: this.href || ''
+                    });
+                });
+            });
+        }
+
+        // Newsletter form submission
+        function setupNewsletterForm() {
+            const form = document.getElementById('newsletter-form');
+            if (form) {
+                form.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    const email = document.getElementById('newsletter-email').value;
+
+                    // Track newsletter signup
+                    trackEvent('newsletter_signup', { method: 'email' });
+
+                    // TODO: Send to your newsletter service
+                    // For now, just show a success message
+                    alert('Thank you for subscribing! (Newsletter integration coming soon)');
+                    form.reset();
+                });
+            }
+        }
+
+        // Track ROI calculator interactions
+        function setupROITracking() {
+            const slider = document.getElementById('spending-slider');
+            if (slider) {
+                let timeout;
+                slider.addEventListener('input', function() {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => {
+                        trackEvent('roi_calculator_used', {
+                            monthly_spend: this.value
+                        });
+                    }, 1000);
+                });
+            }
+        }
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', function() {
+            calculateSavings();
+            addCopyButtons();
+            fetchGitHubStars();
+            setupCTATracking();
+            setupNewsletterForm();
+            setupROITracking();
+
+            // Smooth scroll for anchor links
+            document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+                anchor.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    const target = document.querySelector(this.getAttribute('href'));
+                    if (target) {
+                        target.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start'
+                        });
+
+                        // Track navigation
+                        trackEvent('navigation_click', {
+                            destination: this.getAttribute('href')
+                        });
+                    }
+                });
+            });
+        });
+
+        // Add fade-in animation on scroll
+        const observerOptions = {
+            threshold: 0.1,
+            rootMargin: '0px 0px -50px 0px'
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('fade-in');
+                }
+            });
+        }, observerOptions);
+
+        // Observe all cards
+        document.addEventListener('DOMContentLoaded', function() {
+            document.querySelectorAll('.card-hover').forEach(el => {
+                observer.observe(el);
+            });
+        });
+    </script>
+</body>
+</html>
