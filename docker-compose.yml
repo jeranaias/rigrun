@@ -1,0 +1,182 @@
+# =============================================================================
+# rigrun docker-compose.yml - Easy local deployment
+# =============================================================================
+#
+# QUICK START:
+#   docker-compose up -d          # Start rigrun (cloud-only mode)
+#   docker-compose --profile gpu up -d   # Start with Ollama GPU support
+#
+# PROFILES:
+#   default    - rigrun only (connects to host Ollama or uses cloud)
+#   gpu        - rigrun + Ollama with NVIDIA GPU support
+#   cpu        - rigrun + Ollama CPU-only (slower but works everywhere)
+#
+# CONNECTING TO HOST OLLAMA (recommended for existing Ollama users):
+#   On Linux:   Use OLLAMA_HOST=host.docker.internal:11434 (add extra_hosts)
+#   On Mac/Win: Use OLLAMA_HOST=host.docker.internal:11434 (works by default)
+#
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # rigrun - The LLM router service
+  # ---------------------------------------------------------------------------
+  rigrun:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: rigrun:latest
+    container_name: rigrun
+    ports:
+      - "8787:8787"
+
+    # Persist configuration and cache between restarts
+    volumes:
+      - rigrun-config:/home/rigrun/.rigrun
+
+    # Environment variables
+    environment:
+      # OpenRouter API key for cloud fallback (get one at https://openrouter.ai/keys)
+      # Set via: OPENROUTER_KEY=sk-or-xxx docker-compose up
+      - OPENROUTER_KEY=${OPENROUTER_KEY:-}
+
+      # Ollama host - where to find Ollama
+      # For host Ollama: host.docker.internal:11434
+      # For container Ollama: ollama:11434
+      - OLLAMA_HOST=${OLLAMA_HOST:-host.docker.internal:11434}
+
+      # Default model (auto-detected if not set)
+      - RIGRUN_MODEL=${RIGRUN_MODEL:-}
+
+      # Server port (default 8787)
+      - RIGRUN_PORT=8787
+
+    # Allow connecting to host network services (Ollama on host)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Health check configuration
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  # ---------------------------------------------------------------------------
+  # Ollama with GPU support (NVIDIA)
+  # Activated with: docker-compose --profile gpu up
+  # ---------------------------------------------------------------------------
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: ollama-gpu
+    profiles:
+      - gpu
+    ports:
+      - "11434:11434"
+    volumes:
+      # Persist downloaded models
+      - ollama-models:/root/.ollama
+
+    # NVIDIA GPU support - requires nvidia-docker or nvidia-container-toolkit
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Ollama CPU-only (works everywhere, but slower)
+  # Activated with: docker-compose --profile cpu up
+  # ---------------------------------------------------------------------------
+  ollama-cpu:
+    image: ollama/ollama:latest
+    container_name: ollama-cpu
+    profiles:
+      - cpu
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+    restart: unless-stopped
+
+    # Give more memory for CPU inference
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+        reservations:
+          memory: 8G
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# -----------------------------------------------------------------------------
+# Named volumes for data persistence
+# -----------------------------------------------------------------------------
+volumes:
+  # rigrun configuration and cache
+  rigrun-config:
+    name: rigrun-config
+
+  # Ollama downloaded models (shared between GPU and CPU profiles)
+  ollama-models:
+    name: ollama-models
+
+# =============================================================================
+# USAGE EXAMPLES:
+# =============================================================================
+#
+# 1. Cloud-only mode (no local Ollama needed):
+#    OPENROUTER_KEY=sk-or-xxx docker-compose up -d rigrun
+#
+# 2. Connect to Ollama running on host:
+#    docker-compose up -d rigrun
+#    # Make sure Ollama is running: ollama serve
+#
+# 3. Full stack with GPU Ollama:
+#    docker-compose --profile gpu up -d
+#    # Then pull a model:
+#    docker exec ollama-gpu ollama pull qwen2.5-coder:7b
+#
+# 4. Full stack with CPU Ollama (no GPU required):
+#    docker-compose --profile cpu up -d
+#    docker exec ollama-cpu ollama pull qwen2.5-coder:3b
+#
+# 5. View logs:
+#    docker-compose logs -f rigrun
+#
+# 6. Stop everything:
+#    docker-compose down
+#
+# 7. Stop and remove volumes (clears all data):
+#    docker-compose down -v
+#
+# =============================================================================

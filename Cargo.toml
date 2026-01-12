@@ -1,3 +1,21 @@
+# =============================================================================
+# Binary Size Optimization Notes
+# =============================================================================
+# Current size: ~6.4 MB (release build, unoptimized profile)
+# Target size:  <15 MB (comfortably met, can aim for <5 MB with aggressive opts)
+#
+# Dependency analysis:
+# - tokio (full): Heavy but necessary for async runtime. Consider using
+#   only needed features if size becomes critical.
+# - reqwest: Large due to TLS. Using default features which pulls in rustls.
+# - chrono: Could be replaced with 'time' crate for smaller footprint.
+# - inquire: Interactive prompts add weight. Keep for UX.
+# - tracing/tracing-subscriber: Good balance of features vs size.
+#
+# The release profile below enables aggressive size optimization.
+# Build with: cargo build --release
+# =============================================================================
+
 [package]
 name = "rigrun"
 version = "0.1.0"
@@ -66,3 +84,13 @@ path = "src/main.rs"
 [lib]
 name = "rigrun"
 path = "src/lib.rs"
+
+# =============================================================================
+# Release Profile - Optimized for Binary Size
+# =============================================================================
+[profile.release]
+opt-level = "z"          # Optimize for size (aggressive)
+lto = true               # Link-time optimization (full)
+codegen-units = 1        # Better optimization (slower compile)
+panic = "abort"          # Smaller binary, no unwinding
+strip = true             # Strip symbols from binary

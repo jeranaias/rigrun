@@ -156,10 +156,11 @@ rigrun models
 
 ---
 
-## 🛠️ CLI Commands
+## CLI Commands
 
 ```bash
 rigrun              # Start server
+rigrun --paranoid   # Start server in paranoid mode (no cloud)
 rigrun status       # Show live stats and GPU info
 rigrun config       # Configure settings
 rigrun models       # List available models
@@ -167,6 +168,7 @@ rigrun pull <model> # Download specific model
 rigrun chat         # Interactive chat session
 rigrun ide-setup    # Configure VS Code/Cursor/JetBrains
 rigrun gpu-setup    # GPU setup wizard
+rigrun export       # Export your data (cache, audit log, stats)
 ```
 
 ---
@@ -357,6 +359,82 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
+## Privacy & Data Ownership
+
+rigrun is designed with **privacy maximalism** in mind. Your data is yours.
+
+### What Data rigrun Stores Locally
+
+| Location | Data | Purpose |
+|----------|------|---------|
+| `~/.rigrun/config.json` | API keys, model preferences | Configuration |
+| `~/.rigrun/stats.json` | Query counts, cost savings | Analytics |
+| `~/.rigrun/audit.log` | Query log with timestamps | Transparency |
+| `~/.rigrun/cache/` | Cached responses | Performance |
+
+### What Data Could Go to Cloud
+
+| Scenario | Data Sent | How to Prevent |
+|----------|-----------|----------------|
+| Cloud fallback (complex queries) | Query text, model response | Use `--paranoid` flag |
+| OpenRouter API calls | Full conversation | Don't configure OpenRouter key |
+| Explicit cloud model requests | Query text | Use `model: local` or `auto` |
+
+### Paranoid Mode: 100% Local Operation
+
+```bash
+# Block ALL cloud requests - your data NEVER leaves your machine
+rigrun --paranoid
+
+# Or set in config for permanent paranoid mode
+# Add to ~/.rigrun/config.json:
+# "paranoid_mode": true
+```
+
+When paranoid mode is enabled:
+- All cloud requests are **blocked** and return an error
+- Only local inference (Ollama) and cache are used
+- A warning banner is displayed on startup
+- Blocked requests are logged in the audit log
+
+### Audit Logging
+
+Every query is logged to `~/.rigrun/audit.log` for full transparency:
+
+```
+2024-01-15 10:23:45 |     CACHE_HIT | "What is recursi..." | 0 tokens | $0.00
+2024-01-15 10:24:12 |         LOCAL | "Explain async/a..." | 847 tokens | $0.00
+2024-01-15 10:25:33 | CLOUD_BLOCKED | "Design a microservices..." | 0 tokens | $0.00
+```
+
+To disable audit logging, add to config: `"audit_log_enabled": false`
+
+### Export & Delete Your Data
+
+```bash
+# Export all your data (cache, audit log, stats)
+rigrun export
+
+# Export to specific directory
+rigrun export --output ~/my-backup/
+
+# Delete all rigrun data
+rm -rf ~/.rigrun
+rm -rf ~/AppData/Local/rigrun  # Windows
+```
+
+### Privacy Configuration Summary
+
+```json
+// ~/.rigrun/config.json
+{
+  "audit_log_enabled": true,   // Log all queries (default: true)
+  "paranoid_mode": false       // Block cloud requests (default: false)
+}
+```
+
+---
+
 ## Requirements
 
 - **Rust** - https://rustup.rs (required for `cargo install`)
@@ -366,7 +444,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
-## 📄 License
+## License
 
 This project is [MIT](LICENSE) licensed - use it anywhere, commercially or personally!
 

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,10 @@ struct Cli {
 
     /// Direct prompt to send to the model (or start server if not provided)
     prompt: Option<String>,
+
+    /// Paranoid mode: block ALL cloud requests (local-only operation)
+    #[arg(long, global = true)]
+    paranoid: bool,
 }
 
 #[derive(Subcommand)]
@@ -116,6 +121,22 @@ enum Commands {
 
     /// Interactive GPU setup wizard
     GpuSetup,
+
+    /// Export your data (cache and audit log) for privacy/backup
+    Export {
+        /// Output directory for exported data (defaults to current directory)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+
+    /// Ask a single question (simplest way to use rigrun)
+    Ask {
+        /// The question to ask
+        question: String,
+        /// Model to use (defaults to local)
+        #[arg(short, long)]
+        model: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -125,6 +146,16 @@ pub struct Config {
     pub port: Option<u16>,
     #[serde(default)]
     pub first_run_complete: bool,
+    /// Enable audit logging (default: true)
+    #[serde(default = "default_audit_log_enabled")]
+    pub audit_log_enabled: bool,
+    /// Paranoid mode: block all cloud requests (default: false)
+    #[serde(default)]
+    pub paranoid_mode: bool,
+}
+
+fn default_audit_log_enabled() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -541,7 +572,9 @@ async fn start_server(config: &Config) -> Result<()> {
     let _stats_updater = spawn_stats_updater();
 
     // Start the actual server
-    let mut server = rigrun::Server::new(port).with_default_model(model);
+    let mut server = rigrun::Server::new(port)
+        .with_default_model(model)
+        .with_paranoid_mode(config.paranoid_mode);
     if let Some(ref key) = config.openrouter_key {
         server = server.with_openrouter_key(key.clone());
     }
@@ -1759,21 +1792,199 @@ fn handle_gpu_setup() -> Result<()> {
     Ok(())
 }
 
+/// Handle the ask command - send a single question to rigrun
+async fn handle_ask(question: &str, model: Option<&str>) -> Result<()> {
+    let model = model.unwrap_or("local");
+    let url = "http://localhost:8787/v1/chat/completions";
+    
+    let client = reqwest::Client::new();
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": question}]
+    });
+    
+    let response = client.post(url)
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(300))
+        .send()
+        .await;
+    
+    match response {
+        Ok(res) => {
+            if res.status().is_success() {
+                let json: serde_json::Value = res.json().await?;
+                if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
+                    println!("{}", content);
+                } else {
+                    eprintln!("Error: No response content");
+                }
+            } else {
+                eprintln!("Error: {} - {}", res.status(), res.text().await.unwrap_or_default());
+            }
+        }
+        Err(e) => {
+            eprintln!("Error connecting to rigrun: {}", e);
+            eprintln!("Make sure rigrun server is running (rigrun &)");
+        }
+    }
+    
+    Ok(())
+}
+
+/// Handle the export command - export cached data and audit log
+fn handle_export(output_dir: Option<PathBuf>) -> Result<()> {
+    println!();
+    println!("{BRIGHT_CYAN}{BOLD}=== RigRun Data Export ==={RESET}");
+    println!();
+
+    let output_dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
+
+    // Ensure output directory exists
+    if !output_dir.exists() {
+        fs::create_dir_all(&output_dir)?;
+    }
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let mut files_exported = Vec::new();
+    let mut total_size: u64 = 0;
+
+    // 1. Export cache data
+    println!("{CYAN}[1/3]{RESET} Exporting cache data...");
+    let cache_dir = dirs::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("rigrun")
+        .join("cache");
+    let cache_file = cache_dir.join("query_cache.json");
+
+    if cache_file.exists() {
+        let cache_content = fs::read_to_string(&cache_file)?;
+        let export_cache_path = output_dir.join(format!("rigrun_cache_{}.json", timestamp));
+        fs::write(&export_cache_path, &cache_content)?;
+        let size = cache_content.len() as u64;
+        total_size += size;
+        files_exported.push((export_cache_path.display().to_string(), size));
+        println!("  {GREEN}[OK]{RESET} Cache exported ({} entries)",
+            cache_content.matches("query_hash").count());
+    } else {
+        println!("  {DIM}No cache data found{RESET}");
+    }
+
+    // 2. Export audit log
+    println!("{CYAN}[2/3]{RESET} Exporting audit log...");
+    let audit_log_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".rigrun")
+        .join("audit.log");
+
+    if audit_log_path.exists() {
+        let audit_content = fs::read_to_string(&audit_log_path)?;
+        let export_audit_path = output_dir.join(format!("rigrun_audit_{}.log", timestamp));
+        fs::write(&export_audit_path, &audit_content)?;
+        let size = audit_content.len() as u64;
+        total_size += size;
+        let line_count = audit_content.lines().count();
+        files_exported.push((export_audit_path.display().to_string(), size));
+        println!("  {GREEN}[OK]{RESET} Audit log exported ({} entries)", line_count);
+    } else {
+        println!("  {DIM}No audit log found{RESET}");
+    }
+
+    // 3. Export stats
+    println!("{CYAN}[3/3]{RESET} Exporting statistics...");
+    let stats_path = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".rigrun")
+        .join("stats.json");
+
+    if stats_path.exists() {
+        let stats_content = fs::read_to_string(&stats_path)?;
+        let export_stats_path = output_dir.join(format!("rigrun_stats_{}.json", timestamp));
+        fs::write(&export_stats_path, &stats_content)?;
+        let size = stats_content.len() as u64;
+        total_size += size;
+        files_exported.push((export_stats_path.display().to_string(), size));
+        println!("  {GREEN}[OK]{RESET} Statistics exported");
+    } else {
+        println!("  {DIM}No statistics found{RESET}");
+    }
+
+    // Summary
+    println!();
+    println!("{BRIGHT_CYAN}{BOLD}=== Export Summary ==={RESET}");
+    println!();
+
+    if files_exported.is_empty() {
+        println!("{YELLOW}[!]{RESET} No data to export. Use rigrun to generate some data first.");
+    } else {
+        println!("  Files exported:");
+        for (path, size) in &files_exported {
+            println!("    {GREEN}[OK]{RESET} {} ({} bytes)", path, size);
+        }
+        println!();
+        println!("  Total size: {} bytes", total_size);
+        println!();
+        println!("{GREEN}[OK]{RESET} Export complete!");
+        println!();
+        println!("{DIM}Your data is yours. These files can be used for:");
+        println!("  - Backup and restoration");
+        println!("  - Privacy auditing");
+        println!("  - Migration to another machine{RESET}");
+    }
+
+    println!();
+
+    Ok(())
+}
+
+/// Print paranoid mode warning banner
+fn print_paranoid_banner() {
+    println!();
+    println!("{RED}{BOLD}============================================{RESET}");
+    println!("{RED}{BOLD}          PARANOID MODE ENABLED            {RESET}");
+    println!("{RED}{BOLD}============================================{RESET}");
+    println!("{YELLOW}[!]{RESET} All cloud requests are BLOCKED");
+    println!("{YELLOW}[!]{RESET} Only local inference and cache will be used");
+    println!("{YELLOW}[!]{RESET} Your data NEVER leaves your machine");
+    println!("{RED}{BOLD}============================================{RESET}");
+    println!();
+}
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Check if paranoid mode is enabled via CLI or config
+    let mut config = load_config()?;
+    let paranoid_mode = cli.paranoid || config.paranoid_mode;
+
+    // Update config with CLI override for paranoid mode
+    // This ensures the server gets the correct setting
+    if cli.paranoid {
+        config.paranoid_mode = true;
+    }
+
+    // Initialize audit logging based on config
+    if let Err(e) = rigrun::init_audit_logger(config.audit_log_enabled) {
+        eprintln!("{YELLOW}[!]{RESET} Failed to initialize audit logging: {}", e);
+    }
 
     // Check if we have a prompt argument (either direct prompt or stdin)
     let stdin_is_piped = !io::stdin().is_terminal();
 
     if let Some(prompt_text) = cli.prompt {
         // Direct prompt: rigrun "prompt text"
+        if paranoid_mode {
+            print_paranoid_banner();
+        }
         return direct_prompt(&prompt_text, None);
     } else if stdin_is_piped && cli.command.is_none() {
         // Piped input: echo "prompt" | rigrun
         let input = read_stdin()?;
         if !input.trim().is_empty() {
+            if paranoid_mode {
+                print_paranoid_banner();
+            }
             return direct_prompt(&input, None);
         }
     }
@@ -1781,7 +1992,6 @@ async fn main() -> Result<()> {
     match cli.command {
         None => {
             // Default: start the server
-            let mut config = load_config()?;
 
             // Check if this is first run
             if !config.first_run_complete {
@@ -1794,15 +2004,24 @@ async fn main() -> Result<()> {
                 // After wizard completes, clear screen and start clean server
                 clear_screen();
                 print_banner();
+                if paranoid_mode {
+                    print_paranoid_banner();
+                }
                 start_server(&config).await?;
             } else {
                 // SUBSEQUENT RUNS: Skip wizard, go straight to clean server
                 clear_screen();
                 print_banner();
+                if paranoid_mode {
+                    print_paranoid_banner();
+                }
                 start_server(&config).await?;
             }
         }
         Some(Commands::Status) => {
+            if paranoid_mode {
+                print_paranoid_banner();
+            }
             show_status()?;
         }
         Some(Commands::Config {
@@ -1820,6 +2039,9 @@ async fn main() -> Result<()> {
             pull_model(model).await?;
         }
         Some(Commands::Chat { model }) => {
+            if paranoid_mode {
+                print_paranoid_banner();
+            }
             interactive_chat(model)?;
         }
         Some(Commands::Examples) => {
@@ -1836,6 +2058,12 @@ async fn main() -> Result<()> {
         }
         Some(Commands::GpuSetup) => {
             handle_gpu_setup()?;
+        }
+        Some(Commands::Export { output }) => {
+            handle_export(output)?;
+        }
+        Some(Commands::Ask { question, model }) => {
+            handle_ask(&question, model.as_deref()).await?;
         }
     }
 

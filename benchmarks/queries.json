@@ -1,0 +1,321 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "description": "Benchmark test queries for rigrun semantic cache testing",
+    "total_queries": 120,
+    "semantic_groups": 15,
+    "created": "2025-01-12"
+  },
+  "semantic_groups": [
+    {
+      "name": "recursion_explanation",
+      "description": "Different ways to ask about recursion - should all hit semantic cache",
+      "expected_match": true,
+      "queries": [
+        "What is recursion?",
+        "Explain recursion",
+        "How does recursion work?",
+        "Can you describe recursion in programming?",
+        "Tell me about recursive functions"
+      ]
+    },
+    {
+      "name": "debugging_help",
+      "description": "Various ways to ask for debugging assistance",
+      "expected_match": true,
+      "queries": [
+        "Fix this bug",
+        "Debug this code",
+        "What's wrong with this code?",
+        "Help me find the error",
+        "Why isn't this working?"
+      ]
+    },
+    {
+      "name": "function_creation",
+      "description": "Requests to create/write functions",
+      "expected_match": true,
+      "queries": [
+        "Write a function to sort an array",
+        "Create a method to sort a list",
+        "Implement a sorting function",
+        "Make a function that sorts elements",
+        "Code a sort algorithm"
+      ]
+    },
+    {
+      "name": "code_explanation",
+      "description": "Requests to explain code",
+      "expected_match": true,
+      "queries": [
+        "Explain this code",
+        "What does this code do?",
+        "Can you walk me through this code?",
+        "Help me understand this snippet",
+        "Break down this code for me"
+      ]
+    },
+    {
+      "name": "async_programming",
+      "description": "Questions about async/await patterns",
+      "expected_match": true,
+      "queries": [
+        "How does async/await work?",
+        "Explain async programming",
+        "What is asynchronous code?",
+        "Tell me about async functions",
+        "How do I use await in JavaScript?"
+      ]
+    },
+    {
+      "name": "api_requests",
+      "description": "Questions about making HTTP/API calls",
+      "expected_match": true,
+      "queries": [
+        "How do I make an API request?",
+        "Show me how to call a REST API",
+        "Make an HTTP GET request",
+        "How to fetch data from an API",
+        "Send a request to an endpoint"
+      ]
+    },
+    {
+      "name": "error_handling",
+      "description": "Questions about handling errors",
+      "expected_match": true,
+      "queries": [
+        "How do I handle errors?",
+        "Best practices for error handling",
+        "Try catch best practices",
+        "How to handle exceptions properly",
+        "Error handling patterns"
+      ]
+    },
+    {
+      "name": "database_queries",
+      "description": "Questions about database operations",
+      "expected_match": true,
+      "queries": [
+        "How do I query a database?",
+        "Write a SQL SELECT statement",
+        "Database query examples",
+        "How to fetch data from a database",
+        "SQL query syntax"
+      ]
+    },
+    {
+      "name": "testing_code",
+      "description": "Questions about testing",
+      "expected_match": true,
+      "queries": [
+        "How do I write unit tests?",
+        "Testing best practices",
+        "Write a test for this function",
+        "How to test my code",
+        "Unit testing guide"
+      ]
+    },
+    {
+      "name": "git_operations",
+      "description": "Questions about git commands",
+      "expected_match": true,
+      "queries": [
+        "How do I create a git branch?",
+        "Git branching commands",
+        "Create a new branch in git",
+        "How to make a branch",
+        "Git branch creation"
+      ]
+    },
+    {
+      "name": "performance_optimization",
+      "description": "Questions about improving performance",
+      "expected_match": true,
+      "queries": [
+        "How do I optimize this code?",
+        "Make this code faster",
+        "Performance optimization tips",
+        "How to improve code performance",
+        "Speed up this function"
+      ]
+    },
+    {
+      "name": "data_structures",
+      "description": "Questions about data structures",
+      "expected_match": true,
+      "queries": [
+        "What is a hash map?",
+        "Explain hash tables",
+        "How does a dictionary work?",
+        "Hash map vs array",
+        "When to use a hash map"
+      ]
+    },
+    {
+      "name": "authentication",
+      "description": "Questions about authentication",
+      "expected_match": true,
+      "queries": [
+        "How do I implement authentication?",
+        "User login implementation",
+        "Authentication best practices",
+        "How to authenticate users",
+        "Login system guide"
+      ]
+    },
+    {
+      "name": "refactoring",
+      "description": "Requests to improve/refactor code",
+      "expected_match": true,
+      "queries": [
+        "Refactor this code",
+        "Clean up this code",
+        "Improve this code quality",
+        "Make this code more readable",
+        "Simplify this function"
+      ]
+    },
+    {
+      "name": "regex_patterns",
+      "description": "Questions about regular expressions",
+      "expected_match": true,
+      "queries": [
+        "How do I write a regex?",
+        "Regular expression for email",
+        "Regex pattern matching",
+        "How to use regular expressions",
+        "Regex syntax guide"
+      ]
+    }
+  ],
+  "distinct_queries": [
+    {
+      "category": "code_generation",
+      "description": "Unique code generation requests - should NOT match each other",
+      "queries": [
+        "Write a binary search algorithm in Python",
+        "Create a linked list implementation in JavaScript",
+        "Implement a stack data structure in Rust",
+        "Build a REST API endpoint in Node.js",
+        "Write a Fibonacci sequence generator",
+        "Create a merge sort function",
+        "Implement a binary tree traversal",
+        "Write a rate limiter class",
+        "Create a caching decorator in Python",
+        "Implement the observer pattern"
+      ]
+    },
+    {
+      "category": "specific_debugging",
+      "description": "Debugging with specific code context",
+      "queries": [
+        "Why does this Python list comprehension return None?",
+        "Fix the null pointer exception in this Java code",
+        "Debug the async race condition in this JavaScript",
+        "Why is my React component not re-rendering?",
+        "Fix the SQL injection vulnerability here",
+        "Debug the memory leak in this C++ code",
+        "Why does this regex not match correctly?",
+        "Fix the CORS error in this fetch request",
+        "Debug the infinite loop in this recursion",
+        "Why is my Docker container not starting?"
+      ]
+    },
+    {
+      "category": "framework_specific",
+      "description": "Framework-specific questions",
+      "queries": [
+        "How do I use React hooks for state management?",
+        "Set up a Django REST framework project",
+        "Configure webpack for production builds",
+        "Create a Vue.js component with TypeScript",
+        "Set up Next.js API routes",
+        "Configure ESLint for a TypeScript project",
+        "Set up Jest for React testing",
+        "Create a FastAPI endpoint with Pydantic",
+        "Configure Tailwind CSS in a Next.js app",
+        "Set up GitHub Actions for CI/CD"
+      ]
+    },
+    {
+      "category": "architecture",
+      "description": "Software architecture questions",
+      "queries": [
+        "Explain microservices vs monolith architecture",
+        "When should I use event-driven architecture?",
+        "How to implement CQRS pattern?",
+        "Best practices for API versioning",
+        "How to design a scalable database schema?",
+        "When to use GraphQL vs REST?",
+        "How to implement circuit breaker pattern?",
+        "Best practices for serverless architecture",
+        "How to design a message queue system?",
+        "When to use NoSQL vs SQL databases?"
+      ]
+    },
+    {
+      "category": "devops",
+      "description": "DevOps and infrastructure questions",
+      "queries": [
+        "How to set up Kubernetes cluster?",
+        "Configure nginx as a reverse proxy",
+        "Set up automated database backups",
+        "How to implement blue-green deployment?",
+        "Configure SSL certificates with Let's Encrypt",
+        "Set up monitoring with Prometheus and Grafana",
+        "How to optimize Docker image size?",
+        "Configure load balancing with HAProxy",
+        "Set up log aggregation with ELK stack",
+        "How to implement infrastructure as code with Terraform?"
+      ]
+    }
+  ],
+  "stress_test_queries": [
+    "Quick math: what is 2+2?",
+    "Hello, how are you?",
+    "What is the capital of France?",
+    "Explain the concept of variables",
+    "What is a loop in programming?",
+    "Define: function",
+    "What does API stand for?",
+    "Explain: boolean",
+    "What is an array?",
+    "Define: string"
+  ],
+  "edge_cases": [
+    {
+      "name": "very_short",
+      "description": "Very short queries",
+      "queries": [
+        "?",
+        "hi",
+        "help",
+        "code"
+      ]
+    },
+    {
+      "name": "with_code_blocks",
+      "description": "Queries containing code",
+      "queries": [
+        "Fix this: ```python\ndef foo():\n    return bar\n```",
+        "What does ```const x = () => {}``` do?",
+        "Explain: ```SELECT * FROM users WHERE id = 1```"
+      ]
+    },
+    {
+      "name": "multilingual",
+      "description": "Non-English queries",
+      "queries": [
+        "Qu'est-ce que la recursion?",
+        "Was ist Rekursion?",
+        "Que es la recursion?"
+      ]
+    }
+  ],
+  "expected_results": {
+    "semantic_hit_rate_target": 0.60,
+    "exact_hit_rate_target": 0.95,
+    "cache_latency_ms_target": 5,
+    "description": "Within each semantic_group, after the first query is answered, subsequent queries should hit the semantic cache with 60%+ probability. Exact repeats should hit 95%+ of the time."
+  }
+}
