@@ -40,10 +40,10 @@ rigrun delivers **80-90% cost savings** on LLM API expenses by intelligently rou
 
 ### 1.3 Launch Objectives
 
-1. **Awareness:** Establish rigrun as the go-to solution for cost-conscious LLM developers
-2. **Adoption:** Achieve 500+ GitHub stars in Week 1, 1,000+ by end of Week 2
-3. **Community:** Build an engaged community of contributors and users
-4. **Credibility:** Secure front-page placement on Hacker News and major developer platforms
+1. **Awareness:** Introduce rigrun to developers who might benefit from local-first LLM routing
+2. **Adoption:** Get 100-200 GitHub stars in Week 1 (realistic for a new project), grow organically from there
+3. **Community:** Start building a small community of early adopters and contributors
+4. **Feedback:** Get real-world testing and feedback to improve the tool
 
 ### 1.4 Core Launch Message
 
@@ -573,54 +573,57 @@ The first comment must provide context and include:
 
 ## 6. Success Metrics
 
-### 6.1 Week 1 Goals
+### 6.1 Week 1 Goals (Realistic Targets)
 
-| Category | Metric | Target | Priority |
-|----------|--------|--------|----------|
-| GitHub | Stars | 500+ | Critical |
-| GitHub | Forks | 50+ | High |
-| GitHub | Issues opened | 20+ | Medium |
-| Hacker News | Points | 200+ | Critical |
-| Hacker News | Time on front page | 6+ hours | Critical |
-| Reddit | Combined upvotes | 300+ | High |
-| Twitter | Impressions | 50K+ | High |
-| Twitter | Engagements | 2K+ | High |
-| Twitter | New followers | 200+ | Medium |
-| dev.to | Article views | 5K+ | Medium |
-| Community | Testimonials/success stories | 10+ | High |
-| Technical | Critical unresolved bugs | Zero | Critical |
+| Category | Metric | Minimum | Good | Excellent | Priority |
+|----------|--------|---------|------|-----------|----------|
+| GitHub | Stars | 50+ | 100+ | 200+ | High |
+| GitHub | Forks | 5+ | 15+ | 30+ | Medium |
+| GitHub | Issues opened | 5+ | 10+ | 20+ | Medium |
+| Hacker News | Points | 30+ | 100+ | 200+ | Medium |
+| Reddit | Combined upvotes | 50+ | 150+ | 300+ | Medium |
+| Twitter | Impressions | 5K+ | 20K+ | 50K+ | Medium |
+| Community | People trying it | 10+ | 30+ | 50+ | High |
+| Technical | Critical unresolved bugs | Zero | Zero | Zero | Critical |
+
+**Note:** These are targets for a completely new project with no existing audience. Many projects never hit the "excellent" tier - that's okay. Focus on quality over vanity metrics.
 
 ### 6.2 Week 2 Goals
 
-| Category | Metric | Target | Priority |
-|----------|--------|--------|----------|
-| GitHub | Stars | 1,000+ | Critical |
-| YouTube | Video views | 2K+ | High |
-| Discord | Members | 100+ | High |
-| Media | Podcast/interview booked | 1+ | Medium |
-| Media | Newsletter features | 2+ | Medium |
-| Community | External contributors | 5+ | Medium |
-| Technical | v1.0.1 patch release | Shipped | High |
+| Category | Metric | Minimum | Good | Excellent | Priority |
+|----------|--------|---------|------|-----------|----------|
+| GitHub | Stars | 75+ | 200+ | 400+ | High |
+| Discord | Members | 20+ | 50+ | 100+ | Medium |
+| Community | External contributors | 1+ | 3+ | 5+ | Medium |
+| Technical | v1.0.1 patch release | Shipped | Shipped | Shipped | High |
 
 ### 6.3 Month 1 Goals
 
-| Category | Metric | Target |
-|----------|--------|--------|
-| GitHub | Stars | 2,000+ |
-| GitHub | Active contributors | 10+ |
-| Community | Discord members | 300+ |
-| Community | GitHub Discussions | 100+ threads |
-| Media | Press mentions | 5+ |
-| Technical | v1.1 release | Shipped |
-| Content | Case studies published | 5+ |
+| Category | Metric | Minimum | Good | Excellent |
+|----------|--------|---------|------|-----------|
+| GitHub | Stars | 150+ | 400+ | 1,000+ |
+| GitHub | Active contributors | 2+ | 5+ | 10+ |
+| Community | Discord members | 50+ | 150+ | 300+ |
+| Technical | v1.1 release | Shipped | Shipped | Shipped |
 
-### 6.4 Quarterly Goals (Q1-Q3 2026)
+### 6.4 Contingency: If Traction Is Lower Than Expected
+
+If you're hitting "minimum" targets or below:
+- **Don't panic** - many successful projects started slow
+- Focus on the users you DO have - make them successful
+- Ask for detailed feedback: why aren't more people using it?
+- Consider if positioning/messaging needs adjustment
+- Ship improvements based on user feedback
+- Try different communities or angles
+- Be patient - organic growth takes time
+
+### 6.5 Quarterly Goals (Q1-Q3 2026)
 
 | Quarter | Key Milestones |
 |---------|----------------|
-| Q1 2026 | v1.0-v1.1 released, 2K+ stars, active community established |
-| Q2 2026 | v1.2 with enterprise features, documentation site, 5K+ stars |
-| Q3 2026 | v2.0 planning, conference talks, enterprise pilot program |
+| Q1 2026 | v1.0-v1.1 released, small but engaged community, clear feedback on direction |
+| Q2 2026 | v1.2 based on user feedback, documentation improvements, steady growth |
+| Q3 2026 | Evaluate: Is this solving a real problem? Pivot or continue based on data |
 
 ### 6.5 Metrics Tracking Dashboard
 
@@ -650,9 +653,11 @@ The first comment must provide context and include:
 
 | Level | GitHub Stars | HN Points | Reddit Upvotes |
 |-------|--------------|-----------|----------------|
-| Minimum Success | 50+ | 50+ | 100+ |
-| Good Success | 200+ | 150+ | 300+ |
-| Exceptional Success | 500+ | 300+ | 500+ |
+| Minimum Success | 20+ | 20+ | 30+ |
+| Good Success | 50+ | 75+ | 100+ |
+| Exceptional Success | 100+ | 200+ | 200+ |
+
+**Reality check:** Most new projects don't go viral on day 1. If you hit "minimum success," that's actually a solid start. Focus on converting interested users into happy users.
 
 ---
 

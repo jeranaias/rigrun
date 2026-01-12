@@ -578,11 +578,16 @@ impl StatsTracker {
         SavingsSummary::from_stats(&all_time, &session)
     }
 
-    /// Persist stats to disk
+    /// Persist stats to disk using atomic write (write to temp, then rename)
     pub fn persist_stats(&self) -> Result<()> {
         if let Ok(all_time) = self.all_time.read() {
             let content = serde_json::to_string_pretty(&*all_time)?;
-            fs::write(&self.stats_path, content)?;
+
+            // Use atomic write pattern: write to temp file, then rename
+            // This prevents data corruption if the process crashes mid-write
+            let temp_path = self.stats_path.with_extension("tmp");
+            fs::write(&temp_path, content)?;
+            fs::rename(&temp_path, &self.stats_path)?;
         }
         Ok(())
     }

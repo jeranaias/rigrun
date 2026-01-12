@@ -9,16 +9,16 @@ Twitter (X) is perfect for building hype and connecting with the developer commu
 
 ### Tweet 1: Hook
 ```
-I just cut my LLM API bills from $500/month to $50/month (90% savings) 💸
+I reduced my LLM API bills significantly by routing most queries locally first 💸
 
-Here's how I did it - and you can too 🧵
+Here's how - and you can try it too 🧵
 
-Built rigrun: an open-source local-first LLM router that's 100% free to use.
+Built rigrun: an open-source local-first LLM router.
 
 GitHub: https://github.com/rigrun/rigrun
 ```
 
-**Why it works**: Specific numbers, clear benefit, promise of actionable info
+**Why it works**: Honest claim without overpromising, clear benefit
 
 ---
 
@@ -65,7 +65,7 @@ rigrun is a smart router that gives you the best of both worlds:
 
 ### Tweet 4: Real Numbers
 ```
-My actual usage over 30 days:
+My actual usage over 30 days (your results will vary based on your use case):
 
 📊 Total queries: 4,782
 
@@ -74,13 +74,13 @@ My actual usage over 30 days:
 • Local: 2,789 (58%) - $0
 • Cloud: 459 (10%) - $47.32
 
-Before rigrun: $495/month (OpenAI)
-After rigrun: $47.32/month
-
-💰 Savings: $447.68/month (90.4%)
+My savings were significant, but depends heavily on:
+- Query complexity (simple queries work better locally)
+- How often you ask similar questions (cache hits)
+- Your GPU hardware
 ```
 
-**Why it works**: Concrete data, visual breakdown
+**Why it works**: Concrete data with honest caveats
 
 ---
 
@@ -183,7 +183,6 @@ This is v1.0 - lots more planned:
 • Multi-user support
 • Fine-tuning workflows
 
-⭐ Star the repo if you find this useful
 💬 Join the Discord community
 🐛 Issues/PRs welcome!
 
@@ -199,13 +198,10 @@ Built in public 🛠️
 If you're tired of cloud bills or want to reclaim your GPU:
 
 1️⃣ Try rigrun: https://github.com/rigrun/rigrun
-2️⃣ Star the repo if you like it ⭐
-3️⃣ Share your setup in GitHub Discussions
-4️⃣ RT this thread to help others save money!
+2️⃣ Share your setup in GitHub Discussions
+3️⃣ Let me know what features would help your use case
 
 Questions? Drop them below - I'll answer all 👇
-
-Let's make LLMs affordable for everyone 💪
 ```
 
 **Why it works**: Clear CTAs, friendly tone, promise to engage
@@ -302,7 +298,7 @@ Tag complementary projects:
 - Share user setups as quote tweets
 - Post daily tips/tricks
 - Share behind-the-scenes build process
-- Celebrate milestones (500 stars, 1K stars, etc.)
+- Celebrate milestones (usage growth, features shipped, etc.)
 
 ---
 
@@ -401,18 +397,17 @@ RT if you find this useful!
 
 ### Day 7: Recap
 ```
-Week 1 of rigrun in numbers:
+Week 1 of rigrun - quick update:
 
-⭐ 1,247 GitHub stars
-👥 89 Discord members
-📦 500+ downloads
-💬 150+ discussions
-🐛 5 bugs fixed
+👥 Discord community is growing
+📦 People are trying it out
+💬 Great discussions happening
+🐛 5 bugs fixed based on feedback
 ✨ 2 features shipped
 
-To everyone who tried it, shared it, or contributed - THANK YOU! ❤️
+To everyone who tried it or gave feedback - thank you!
 
-Week 2 roadmap 🧵👇
+Week 2 focus 🧵👇
 ```
 
 ---
@@ -522,21 +517,21 @@ Fair point. The trade-off is [explain]. Do you think [alternative] would work be
 - 1K+ retweets
 - 100+ replies
 - 50K+ impressions
-- 500+ GitHub stars from Twitter
+- Strong community engagement
 
 ### Good Launch
 - 1K+ likes on thread
 - 200+ retweets
 - 50+ replies
 - 20K+ impressions
-- 200+ GitHub stars from Twitter
+- Active discussions
 
 ### Decent Launch
 - 500+ likes on thread
 - 100+ retweets
 - 20+ replies
 - 10K+ impressions
-- 100+ GitHub stars from Twitter
+- Some interested users trying it out
 
 ---
 

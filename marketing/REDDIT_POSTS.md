@@ -746,7 +746,15 @@ Code review from experienced Rustaceans very welcome! This is my first "real" Ru
 
 ## General Reddit Best Practices
 
+### Self-Promotion Rules (IMPORTANT)
+**Before posting ANY self-promotional content:**
+- Maintain a 10:1 engagement ratio (10 non-promotional comments/posts for every 1 promotional post)
+- Participate genuinely in the community first - answer questions, help others, contribute to discussions
+- Most subreddits require you to be an active member before posting your own project
+- If you haven't been engaging in a subreddit, DON'T post there yet - start participating first
+
 ### Before Posting
+- [ ] Verify you have 10:1 engagement ratio in this subreddit
 - [ ] Read subreddit rules carefully
 - [ ] Check if similar posts were made recently
 - [ ] Verify links work
@@ -767,10 +775,11 @@ Code review from experienced Rustaceans very welcome! This is my first "real" Ru
 
 ### What NOT to Do
 - Don't spam multiple subreddits at once (1-2 hour gaps minimum)
-- Don't ask for upvotes
+- Don't ask for upvotes or GitHub stars
 - Don't delete and repost if it flops
 - Don't argue with mods
 - Don't cross-post too aggressively
+- Don't post if you haven't been active in the community (10:1 rule)
 
 ### If Post is Removed
 - Read removal reason carefully
@@ -818,9 +827,9 @@ After posting on all 4 subreddits:
 - [ ] At least 1 post reached top 10 of subreddit
 - [ ] 100+ combined upvotes
 - [ ] 50+ comments total
-- [ ] 200+ GitHub stars from Reddit traffic
+- [ ] 50+ GitHub stars from Reddit traffic
 - [ ] 5+ quality feature requests
-- [ ] 3+ testimonials ("this is great!")
+- [ ] Some positive feedback from real users
 - [ ] Zero unresolved critical bugs reported
 
 ---

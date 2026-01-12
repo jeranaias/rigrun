@@ -2,11 +2,11 @@
 
 ## Title Options (Pick One)
 
-### Option 1: Direct & Benefit-Focused (RECOMMENDED)
+### Option 1: Direct & Technical (RECOMMENDED)
 ```
-Show HN: rigrun - Local-First LLM Router (80-90% cost savings)
+Show HN: rigrun - Convenience wrapper combining LLM caching + local inference + cloud fallback
 ```
-**Why it works**: Clear value proposition, mentions cost savings immediately, follows Show HN format
+**Why it works**: Honest about what it is, technically descriptive, follows Show HN format
 
 ### Option 2: Technical & Intriguing
 ```
@@ -16,9 +16,9 @@ Show HN: rigrun - Route LLMs through cache → local GPU → cloud fallback
 
 ### Option 3: Problem-Solution
 ```
-Show HN: I cut my LLM API bills by 90% with local-first routing
+Show HN: rigrun - Local-first LLM router with semantic caching
 ```
-**Why it works**: Personal story, relatable problem, dramatic savings
+**Why it works**: Technical, describes core functionality
 
 ### Option 4: Community-Oriented
 ```
@@ -93,7 +93,7 @@ I'd love feedback on:
 2. Should I add embeddings/vision fallback?
 3. Any interest in enterprise features (multi-user, team analytics)?
 
-Happy to answer questions! This is my first Rust project that's not a toy, so go easy on me :)
+Happy to answer questions.
 
 GitHub: https://github.com/rigrun/rigrun
 ```
@@ -338,8 +338,8 @@ Happy to share more detailed stats if there's interest!
   │       └─ [User 2] "llama3 8B, super fast"
   ├─ [User 3] "Why not just use vLLM?"
   │   └─ [You] "vLLM is great for serving, but rigrun focuses on..."
-  └─ [User 4] "This is awesome, starring now"
-      └─ [You] "Thank you! Let me know if you hit any issues"
+  └─ [User 4] "This is useful, will try it out"
+      └─ [You] "Thanks! Let me know if you hit any issues"
 ```
 
 **Key**: Keep responses helpful, humble, and conversational. You're having a discussion, not selling.
@@ -351,7 +351,7 @@ Happy to share more detailed stats if there's interest!
 ### Don't Say:
 - "This is revolutionary" (let others decide)
 - "Better than [competitor]" (comes off as combative)
-- "Please star/upvote" (against HN rules)
+- "Please star/upvote" (against HN rules and comes across as needy)
 - "Thanks for the gold!" (no gold on HN)
 
 ### Do Say:
@@ -368,21 +368,21 @@ Happy to share more detailed stats if there's interest!
 - 300+ points
 - 100+ comments
 - Front page for 8+ hours
-- 500+ GitHub stars from HN traffic
+- 200+ GitHub stars from HN traffic
 - 3+ feature requests from discussion
 
 ### Good Launch
 - 150-300 points
 - 50+ comments
 - Front page for 4+ hours
-- 200+ GitHub stars from HN traffic
+- 100+ GitHub stars from HN traffic
 - Active discussion in comments
 
 ### Decent Launch
 - 50-150 points
 - 20+ comments
 - Front page for 1+ hour
-- 100+ GitHub stars from HN traffic
+- 50+ GitHub stars from HN traffic
 - Some constructive feedback
 
 ### What to Do If It Flops

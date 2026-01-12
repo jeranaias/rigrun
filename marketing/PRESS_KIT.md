@@ -36,11 +36,8 @@ rigrun is an open-source, local-first LLM (Large Language Model) router designed
 - **12ms median latency** for cached queries
 - **180ms median latency** for local (7B model)
 
-### Adoption (Update post-launch)
-- GitHub stars: [TBD]
-- Downloads: [TBD]
-- Active users: [TBD]
-- Community members: [TBD]
+### Adoption
+This is a new project. Check the GitHub repository for current metrics.
 
 ---
 
@@ -162,66 +159,30 @@ rigrun solves this by implementing **intelligent three-tier routing**:
 
 ---
 
-## Founder Bio (PLACEHOLDER - CUSTOMIZE)
+## Project Information
 
-**[Your Name]**
-[Your Title/Role]
+**Project Name**: rigrun
 
-[Your Name] is a [software engineer/developer/founder] with [X years] of experience in [relevant background]. Frustrated by skyrocketing LLM API costs for personal projects, [he/she/they] built rigrun to enable affordable, local-first AI inference. [Additional background, previous projects, expertise].
+**Type**: Independent Open Source Project
 
-*Photo: [Link to high-res headshot]*
+**Started**: January 2026
 
-**Contact**:
-- Email: [email@example.com]
-- Twitter: [@handle]
-- GitHub: [@handle]
-- LinkedIn: [linkedin.com/in/profile]
+**License**: MIT
 
----
+**Funding**: None - this is a personal open source project
 
-## Company Information (If Applicable)
-
-**Company Name**: [TBD or "Independent Open Source Project"]
-
-**Founded**: January 2026
-
-**Location**: [Your location or "Distributed/Remote"]
-
-**Team Size**: [1 (solo) or team size]
-
-**Funding**: Bootstrapped / Open source (no external funding)
-
-**Mission**: Make LLM technology accessible and affordable for developers worldwide by prioritizing local-first inference.
+**Mission**: Provide a practical tool for developers who want to reduce LLM API costs by routing queries locally when possible.
 
 ---
 
 ## Media Assets
 
-### Logos
-- **Primary logo**: [Link to PNG/SVG]
-- **Icon only**: [Link to PNG/SVG]
-- **Wordmark**: [Link to PNG/SVG]
-- **Monochrome versions**: [Link to PNG/SVG]
+All media assets are available in the GitHub repository:
+- Screenshots: See the README.md for current screenshots
+- Architecture diagrams: Available in /docs/
+- Demo: See the repository for installation instructions to try it yourself
 
-*Download all: [Link to asset package]*
-
-### Screenshots
-1. **Terminal/CLI interface**: [Link to high-res screenshot]
-2. **GPU auto-detection**: [Link to screenshot]
-3. **Cost tracking dashboard**: [Link to screenshot]
-4. **Configuration UI**: [Link to screenshot]
-
-### Diagrams
-1. **Architecture diagram**: [Link to high-res image]
-2. **Routing flow diagram**: [Link to image]
-3. **Cost comparison chart**: [Link to image]
-
-### Demo Videos
-1. **Quick setup** (2 min): [YouTube/Vimeo link]
-2. **Full walkthrough** (10 min): [YouTube/Vimeo link]
-3. **Cost savings demo** (5 min): [YouTube/Vimeo link]
-
-*All media assets licensed under [CC BY 4.0 / MIT / specify license]*
+*Note: This is a new project - professional media assets are still being developed.*
 
 ---
 
@@ -251,39 +212,11 @@ rigrun solves this by implementing **intelligent three-tier routing**:
 
 ---
 
-## Quotes (PLACEHOLDER - CUSTOMIZE AFTER LAUNCH)
+## About the Project
 
-### Founder Quote
-> "I was paying $500/month to OpenAI while my $800 GPU sat idle. rigrun was born from that frustration—why not use the hardware I already own? Now I spend $50/month and get 90% of my work done locally, privately, and instantly."
->
-> — [Your Name], Creator of rigrun
+rigrun was built out of personal frustration with high LLM API costs. The goal was simple: use local hardware when possible, fall back to cloud when necessary, and cache similar queries to avoid redundant work.
 
-### Early User Quotes (Add post-launch)
-> "[Quote about cost savings]"
-> — [User Name], [Title/Company]
-
-> "[Quote about ease of use]"
-> — [User Name], [Title/Company]
-
-> "[Quote about privacy benefits]"
-> — [User Name], [Title/Company]
-
----
-
-## Recognition & Press (Update post-launch)
-
-### Press Coverage
-- [Publication]: "[Headline]" - [Date] - [Link]
-- [Publication]: "[Headline]" - [Date] - [Link]
-
-### Community Recognition
-- Hacker News: [Points] points, [#ranking] - [Link]
-- Reddit r/LocalLLaMA: [Upvotes] upvotes - [Link]
-- Product Hunt: [#ranking] Product of the Day - [Link]
-
-### Awards & Badges
-- [Award name] - [Date]
-- [Badge/certification] - [Date]
+This is a new open source project. User feedback and real-world testing are ongoing.
 
 ---
 
@@ -370,22 +303,12 @@ rigrun solves this by implementing **intelligent three-tier routing**:
 
 ## Contact Information
 
-### For Press Inquiries
-**Email**: [press@rigrun.dev] (PLACEHOLDER)
-**Response time**: Within 24 hours
-
 ### For Technical Questions
 **GitHub Issues**: https://github.com/rigrun/rigrun/issues
-**Discord**: [Link] (PLACEHOLDER)
 **Documentation**: https://github.com/rigrun/rigrun/tree/main/docs
 
-### For Partnership Opportunities
-**Email**: [partnerships@rigrun.dev] (PLACEHOLDER)
-
-### Social Media
-- **Twitter/X**: [@rigrun] (PLACEHOLDER)
-- **LinkedIn**: [linkedin.com/company/rigrun] (PLACEHOLDER)
-- **GitHub**: https://github.com/rigrun/rigrun
+### Repository
+**GitHub**: https://github.com/rigrun/rigrun
 
 ---
 
@@ -456,8 +379,6 @@ rigrun solves this by implementing **intelligent three-tier routing**:
 
 ### Community
 - **GitHub Discussions**: https://github.com/rigrun/rigrun/discussions
-- **Discord**: [Link] (PLACEHOLDER)
-- **Twitter**: [@rigrun] (PLACEHOLDER)
 
 ---
 
@@ -477,23 +398,17 @@ rigrun solves this by implementing **intelligent three-tier routing**:
 - **Helpful** - Focus on solving problems, not self-promotion
 
 ### Visual Style
-- **Colors**: [Define primary/secondary colors]
 - **Typography**: Monospace for code, clean sans-serif for UI
 - **Aesthetic**: Terminal-inspired, developer-focused, minimalist
 
 ---
 
-## Press Kit Download
+## Resources
 
-**Download complete press kit** (logos, screenshots, brand assets):
-[Link to .zip file] (PLACEHOLDER)
-
-**Contents**:
-- Logos (PNG, SVG, multiple sizes)
-- Screenshots (high-resolution)
-- Diagrams and charts
-- Fact sheet (PDF)
-- Brand guidelines (PDF)
+All project resources are available on GitHub:
+- Source code and documentation
+- Installation instructions
+- API reference
 
 ---
 
@@ -512,7 +427,7 @@ This press kit is provided under [CC BY 4.0](https://creativecommons.org/license
 
 **Last Updated**: January 12, 2026
 
-**For the most current information**, visit https://github.com/rigrun/rigrun or contact [press email].
+**For the most current information**, visit https://github.com/rigrun/rigrun.
 
 ---
 

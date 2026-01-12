@@ -40,6 +40,15 @@ elif command -v wget > /dev/null 2>&1; then
     RELEASE=$(wget -qO- "$RELEASE_URL")
 else
     echo "      Neither curl nor wget found. Using cargo install..."
+    if ! command -v cargo > /dev/null 2>&1; then
+        echo ""
+        echo "      \033[31mError: Rust/Cargo is not installed.\033[0m"
+        echo ""
+        echo "      To install Rust, visit: https://rustup.rs"
+        echo "      After installing Rust, restart your terminal and run this installer again."
+        echo ""
+        exit 1
+    fi
     cargo install rigrun
     exit 0
 fi
@@ -48,6 +57,15 @@ VERSION=$(echo "$RELEASE" | grep '"tag_name"' | head -1 | cut -d '"' -f 4)
 
 if [ -z "$VERSION" ]; then
     echo "      Could not determine latest version. Using cargo install..."
+    if ! command -v cargo > /dev/null 2>&1; then
+        echo ""
+        echo "      \033[31mError: Rust/Cargo is not installed.\033[0m"
+        echo ""
+        echo "      To install Rust, visit: https://rustup.rs"
+        echo "      After installing Rust, restart your terminal and run this installer again."
+        echo ""
+        exit 1
+    fi
     cargo install rigrun
     exit 0
 fi
@@ -72,6 +90,15 @@ fi
 
 if [ "$HTTP_CODE" != "200" ]; then
     echo "      No pre-built binary for $TARGET. Using cargo install..."
+    if ! command -v cargo > /dev/null 2>&1; then
+        echo ""
+        echo "      \033[31mError: Rust/Cargo is not installed.\033[0m"
+        echo ""
+        echo "      To install Rust, visit: https://rustup.rs"
+        echo "      After installing Rust, restart your terminal and run this installer again."
+        echo ""
+        exit 1
+    fi
     cargo install rigrun
     exit 0
 fi
@@ -143,7 +170,7 @@ if ! command -v ollama > /dev/null 2>&1; then
         curl -fsSL https://ollama.com/install.sh | sh
         echo "  \033[32mOllama installed!\033[0m"
     else
-        echo "  \033[90mInstall Ollama later: https://ollama.ai/download\033[0m"
+        echo "  \033[90mInstall Ollama later: https://ollama.com/download\033[0m"
     fi
 fi
 

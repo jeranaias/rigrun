@@ -153,15 +153,36 @@ fn prompt_openrouter_setup(config: &mut Config) -> Result<()> {
 
             // Prompt for the API key
             let api_key = Text::new("Paste your API key here:")
-                .with_help_message("Press Enter after pasting your key")
+                .with_help_message("Press Enter after pasting your key (OpenRouter keys start with 'sk-or-')")
                 .with_validator(|input: &str| {
-                    if input.trim().is_empty() {
-                        Ok(inquire::validator::Validation::Invalid(
+                    let input = input.trim();
+                    if input.is_empty() {
+                        return Ok(inquire::validator::Validation::Invalid(
                             "API key cannot be empty. Enter a key or press Esc to skip.".into()
-                        ))
-                    } else {
-                        Ok(inquire::validator::Validation::Valid)
+                        ));
                     }
+
+                    // Check for common wrong key formats and warn
+                    if input.starts_with("sk-ant-") {
+                        return Ok(inquire::validator::Validation::Invalid(
+                            "This looks like an Anthropic API key (sk-ant-...). OpenRouter keys start with 'sk-or-'. Get one at https://openrouter.ai/keys".into()
+                        ));
+                    }
+
+                    if input.starts_with("sk-") && !input.starts_with("sk-or-") {
+                        return Ok(inquire::validator::Validation::Invalid(
+                            "This looks like an OpenAI API key (sk-...). OpenRouter keys start with 'sk-or-'. Get one at https://openrouter.ai/keys".into()
+                        ));
+                    }
+
+                    // Warn but allow if doesn't match expected format
+                    if !input.starts_with("sk-or-") {
+                        return Ok(inquire::validator::Validation::Invalid(
+                            "OpenRouter API keys typically start with 'sk-or-'. Please verify your key or get one at https://openrouter.ai/keys".into()
+                        ));
+                    }
+
+                    Ok(inquire::validator::Validation::Valid)
                 })
                 .prompt();
 

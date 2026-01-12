@@ -16,43 +16,31 @@
 
 **Reduce LLM costs by 90% with local GPU inference.** OpenAI-compatible API router for self-hosted AI that intelligently routes requests through semantic cache → local LLM (Ollama) → cloud fallback. Drop-in GPT alternative and Claude API alternative for developers who want privacy, performance, and cost savings.
 
-**🎯 Perfect for**: Developers tired of expensive OpenAI/Claude bills | Teams needing private AI | Anyone with a GPU wanting to reduce LLM costs
+---
+
+## Prerequisites
+
+Before installing rigrun, you need the following:
+
+1. **Rust** - https://rustup.rs (required for `cargo install`)
+2. **Ollama** - https://ollama.com/download (required for local inference)
+3. **GPU** (optional but recommended) - NVIDIA, AMD, Apple Silicon, or Intel Arc
 
 ---
 
-## 🎯 Why Choose rigrun? (Local LLM Router)
-
-**The Problem**: OpenAI GPT-4 and Claude API costs add up fast. Developers pay $300+/month for API calls that could run locally.
-
-**The Solution**: rigrun is an intelligent LLM router that puts your GPU first:
-
-- **💰 90% Cost Reduction**: Semantic caching + local GPU inference + smart cloud fallback = $30/month instead of $300/month
-- **🔒 Self-Hosted AI Privacy**: Local-first execution keeps sensitive data on your machine (HIPAA/SOC2 friendly)
-- **⚡ Fast GPU Inference**: Auto-detects NVIDIA, AMD, Apple Silicon, Intel Arc with optimal Ollama model recommendations
-- **🔌 OpenAI API Compatible**: Drop-in replacement for OpenAI SDK - change one line of code (`base_url`)
-- **📊 Real-Time Cost Tracking**: Monitor cache hits, local inference, and cloud fallback with live statistics
-- **🎮 Universal GPU Support**: Works with any GPU - from laptop to datacenter
-
-**Real Benchmark**: $500/month OpenAI bill → $50/month with rigrun (measured across 10M tokens/month)
-
-> "Finally, a Claude API alternative that actually saves money without sacrificing quality" - Early adopter
-
----
-
-## 🚀 Quick Start - 3 Steps to Reduce LLM Costs
+## Quick Start
 
 ### 1. Install Ollama (Local LLM Runtime)
 ```bash
 # Mac/Linux
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Windows - Download installer
-# https://ollama.ai/download
+# Windows - Download installer from https://ollama.com/download
 ```
 
 ### 2. Install rigrun (LLM Router)
 ```bash
-# Via Cargo
+# Via Cargo (requires Rust - see Prerequisites)
 cargo install rigrun
 
 # Or download pre-built binary
@@ -64,8 +52,6 @@ cargo install rigrun
 rigrun
 ```
 **Auto-magic setup**: Detects your GPU → Downloads optimal local LLM → Starts API server on `http://localhost:8787`
-
-**⭐ Quick win**: Star the repo to help other developers discover cost-effective local AI!
 
 ---
 
@@ -127,9 +113,8 @@ console.log(response.choices[0].message.content);
 |------|-------------------|-------|
 | <6GB | `qwen2.5-coder:3b` | Lightweight, fast |
 | 6-8GB | `qwen2.5-coder:7b` | Good balance |
-| 8-16GB | `qwen2.5-coder:14b` | Recommended |
-| 16-24GB | `deepseek-coder-v2:16b` | Professional |
-| 24GB+ | `llama3.3:70b` | Maximum capability |
+| 9-16GB | `qwen2.5-coder:14b` | Recommended |
+| 17GB+ | `deepseek-coder-v2:16b` or `llama3.3:70b` | Professional / Maximum capability |
 
 ```bash
 # Pull specific model
@@ -301,38 +286,24 @@ The setup wizard auto-generates configurations using your local AI!
 
 ---
 
-## 🌟 Who's Using rigrun?
+## Who Uses rigrun?
 
-rigrun is trusted by developers and teams who want to reduce LLM costs without sacrificing quality:
+rigrun is useful for:
 
-- **Indie Developers**: Building AI features without breaking the bank
-- **Startups**: Keeping runway longer by cutting AI infrastructure costs
-- **Enterprise Teams**: HIPAA/SOC2 compliance with self-hosted AI
+- **Indie Developers**: Building AI features without high API costs
+- **Startups**: Reducing AI infrastructure expenses
+- **Enterprise Teams**: Self-hosted AI for compliance requirements
 - **Open Source Projects**: Running LLM-powered tools affordably
 - **Data Scientists**: Local experimentation without cloud bills
 
-### Community Testimonials
+### Example Savings
 
-> "Went from $400/month in OpenAI bills to $40. rigrun paid for itself in week one."
-> — Solo developer, AI-powered SaaS
+The following are hypothetical examples of potential savings (actual results vary based on usage patterns):
 
-> "Perfect Claude API alternative for our compliance needs. Everything runs locally."
-> — DevOps Lead, Healthcare Startup
+- A developer handling 10M tokens/month could reduce costs from ~$300/month (cloud-only) to ~$30/month (90% local)
+- Teams with repetitive queries see higher cache hit rates and greater savings
 
-> "Finally, a GPT alternative that actually works locally. Setup took 5 minutes."
-> — ML Engineer
-
-**Want to share your story?** [Open a discussion](https://github.com/rigrun/rigrun/discussions) and we'll feature you!
-
----
-
-## 📢 Featured In
-
-*Have you written about rigrun?* [Let us know](https://github.com/rigrun/rigrun/discussions/new) and we'll add your article here!
-
-- [ ] Your blog post here
-- [ ] Hacker News discussion
-- [ ] Reddit r/LocalLLaMA feature
+**Have real numbers to share?** [Open a discussion](https://github.com/rigrun/rigrun/discussions) with your experience.
 
 ---
 
@@ -386,10 +357,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
-## 📝 Requirements
+## Requirements
 
-- **Ollama** - https://ollama.ai/download (required for local inference)
-- **Rust** (for building from source) - https://rustup.rs
+- **Rust** - https://rustup.rs (required for `cargo install`)
+- **Ollama** - https://ollama.com/download (required for local inference)
 - **GPU** (optional but recommended) - NVIDIA, AMD, Apple Silicon, or Intel Arc
 - **OpenRouter API Key** (optional) - For cloud fallback only
 
@@ -428,37 +399,3 @@ This project is [MIT](LICENSE) licensed - use it anywhere, commercially or perso
 3. **💬 [Join discussions](https://github.com/rigrun/rigrun/discussions)** to share your cost savings
 4. **🐛 [Report issues](https://github.com/rigrun/rigrun/issues)** to help improve rigrun
 
----
-
-## 📚 SEO Keywords & Use Cases
-
-**This tool is perfect if you're searching for**:
-- Local LLM inference solutions
-- OpenAI API cost reduction strategies
-- Self-hosted AI for privacy compliance (HIPAA, SOC2, GDPR)
-- Ollama API router with caching
-- GPT-4 alternative that runs locally
-- Claude API alternative for cost savings
-- How to reduce LLM costs by 90%
-- GPU inference for language models
-- OpenAI-compatible local API server
-- Semantic caching for LLM requests
-- Multi-model LLM router (local + cloud)
-
-**Technical keywords**: Rust LLM proxy, OpenAI SDK compatible, CUDA inference, ROCm support, Apple Metal acceleration, semantic similarity caching, token cost optimization, LLM request routing, Ollama integration, OpenRouter fallback
-
----
-
-## 🏷️ Recommended GitHub Topics
-
-When forking or referencing this repo, use these topics for better discoverability:
-
-`llm` `local-llm` `ollama` `openai-api` `cost-optimization` `self-hosted` `gpu-inference` `semantic-cache` `rust` `llm-router` `openai-compatible` `claude-alternative` `gpt-alternative` `ai-cost-reduction` `local-ai`
-
----
-
-**Built with ❤️ for developers who refuse to overpay for AI.**
-
-*Put your rig to work. Save 90%. Keep your data private.*
-
-**[⭐ Star us on GitHub](https://github.com/rigrun/rigrun)** | **[📖 Read the docs](docs/)** | **[💬 Get help](https://github.com/rigrun/rigrun/discussions)**

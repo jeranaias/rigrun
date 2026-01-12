@@ -26,6 +26,14 @@ try {
 } catch {
     Write-Host "      Could not fetch latest release. Using cargo install instead..." -ForegroundColor Yellow
     Write-Host ""
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Host "      Error: Rust/Cargo is not installed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "      To install Rust, visit: https://rustup.rs" -ForegroundColor Yellow
+        Write-Host "      After installing Rust, restart your terminal and run this installer again." -ForegroundColor Yellow
+        Write-Host ""
+        exit 1
+    }
     Write-Host "Running: cargo install rigrun" -ForegroundColor Cyan
     cargo install rigrun
     Write-Host ""
@@ -45,6 +53,14 @@ if (-not $asset) {
 
 if (-not $asset) {
     Write-Host "      No pre-built binary for $target. Using cargo install..." -ForegroundColor Yellow
+    if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Host "      Error: Rust/Cargo is not installed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "      To install Rust, visit: https://rustup.rs" -ForegroundColor Yellow
+        Write-Host "      After installing Rust, restart your terminal and run this installer again." -ForegroundColor Yellow
+        Write-Host ""
+        exit 1
+    }
     cargo install rigrun
     exit 0
 }
@@ -102,7 +118,7 @@ if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
         Remove-Item $ollamaPath -ErrorAction SilentlyContinue
         Write-Host "  Ollama installed!" -ForegroundColor Green
     } else {
-        Write-Host "  Install Ollama later: https://ollama.ai/download" -ForegroundColor DarkGray
+        Write-Host "  Install Ollama later: https://ollama.com/download" -ForegroundColor DarkGray
     }
 }
 

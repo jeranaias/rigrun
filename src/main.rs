@@ -145,14 +145,66 @@ fn get_config_dir() -> Result<PathBuf> {
     Ok(config_dir)
 }
 
+/// Validate OpenRouter API key format and warn about common mistakes.
+/// Returns true if key looks valid, false otherwise.
+fn validate_openrouter_key(key: &str) -> bool {
+    let key = key.trim();
+
+    // Check for empty key
+    if key.is_empty() {
+        return false;
+    }
+
+    // Check for common wrong key formats
+    if key.starts_with("sk-ant-") {
+        eprintln!(
+            "{YELLOW}[!]{RESET} Warning: This looks like an Anthropic API key (starts with 'sk-ant-')."
+        );
+        eprintln!(
+            "{YELLOW}[!]{RESET}          OpenRouter keys start with 'sk-or-'. Get one at: https://openrouter.ai/keys"
+        );
+        return false;
+    }
+
+    if key.starts_with("sk-") && !key.starts_with("sk-or-") {
+        eprintln!(
+            "{YELLOW}[!]{RESET} Warning: This looks like an OpenAI API key (starts with 'sk-')."
+        );
+        eprintln!(
+            "{YELLOW}[!]{RESET}          OpenRouter keys start with 'sk-or-'. Get one at: https://openrouter.ai/keys"
+        );
+        return false;
+    }
+
+    // Check for correct OpenRouter format
+    if !key.starts_with("sk-or-") {
+        eprintln!(
+            "{YELLOW}[!]{RESET} Warning: OpenRouter API key doesn't start with 'sk-or-'."
+        );
+        eprintln!(
+            "{YELLOW}[!]{RESET}          This may not be a valid OpenRouter key. Get one at: https://openrouter.ai/keys"
+        );
+        return false;
+    }
+
+    true
+}
+
 pub fn load_config() -> Result<Config> {
     let config_path = get_config_dir()?.join("config.json");
-    if config_path.exists() {
+    let config = if config_path.exists() {
         let content = fs::read_to_string(&config_path)?;
-        Ok(serde_json::from_str(&content)?)
+        serde_json::from_str(&content)?
     } else {
-        Ok(Config::default())
+        Config::default()
+    };
+
+    // Validate OpenRouter key if present
+    if let Some(ref key) = config.openrouter_key {
+        validate_openrouter_key(key);
     }
+
+    Ok(config)
 }
 
 pub fn save_config(config: &Config) -> Result<()> {

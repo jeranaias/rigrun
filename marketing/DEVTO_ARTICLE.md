@@ -1,6 +1,6 @@
-# How I Saved 98% on LLM API Costs with Local-First Routing
+# Building a Local-First LLM Router: A Technical Deep Dive
 
-*A technical deep dive into building rigrun: an open-source LLM router that slashed my monthly bills from $500 to $50*
+*How rigrun routes queries through cache, local GPU, and cloud fallback - with real usage numbers*
 
 ---
 
@@ -12,7 +12,7 @@ I stared at my idle RTX 3080. I had spent $800 on this card for gaming, but it w
 
 That's when I decided to build **rigrun** - a local-first LLM router that intelligently decides where to send each request: cache, local GPU, or cloud.
 
-**Spoiler**: It worked. I'm now spending $50/month instead of $500.
+**Spoiler**: It worked for my use case. Your results will depend on your query patterns and hardware.
 
 ---
 
@@ -180,9 +180,9 @@ async fn fallback_to_cloud(query: &str) -> Result<Response> {
 
 ---
 
-## The Results: Real Numbers
+## The Results: My Numbers (Your Mileage Will Vary)
 
-I tracked 30 days of usage on my coding assistant project:
+I tracked 30 days of usage on my coding assistant project. These numbers are specific to my use case (mostly code generation and simple Q&A).
 
 ### Query Distribution
 ```
@@ -194,12 +194,17 @@ Tier Breakdown:
 └─ Cloud:    459 queries ( 9.6%) → $47.32
 ```
 
-### Cost Comparison
-| Approach | Monthly Cost | Savings |
-|----------|--------------|---------|
-| **100% OpenAI (GPT-3.5)** | $495.00 | Baseline |
-| **100% OpenAI (GPT-4)** | $1,875.00 | Baseline |
-| **rigrun (mixed)** | $47.32 | **90.4%** |
+### My Cost Comparison
+| Approach | Monthly Cost | Notes |
+|----------|--------------|-------|
+| **100% Cloud (estimated)** | ~$400-500 | Depends on model/provider |
+| **rigrun (my setup)** | $47.32 | 90% handled locally |
+
+**Important caveats:**
+- These numbers assume most of your queries are simple enough for local models
+- Complex reasoning tasks will hit cloud more often
+- Cache hit rate depends on how repetitive your queries are
+- Your hardware affects local inference quality and speed
 
 ### Latency Distribution
 ```
@@ -209,7 +214,7 @@ P90:            38ms     350ms    1,450ms
 P99:            45ms     420ms    2,100ms
 ```
 
-**Takeaway**: Cache is 15x faster than local, 70x faster than cloud.
+**Takeaway**: Caching provides the biggest latency win when queries are similar enough to hit.
 
 ---
 
@@ -682,21 +687,22 @@ curl http://localhost:8787/stats
 
 **Key Takeaways**:
 
-1. **Local-first is viable** - 90% of queries don't need cloud models
-2. **Semantic caching is powerful** - 32% instant responses
-3. **Smart routing works** - Best of both worlds (cost + quality)
-4. **Open source tools enable this** - Ollama, OpenRouter made it possible
+1. **Local-first can work for certain use cases** - Simple queries often don't need cloud models
+2. **Semantic caching helps** - If you ask similar questions, you can avoid redundant work
+3. **Smart routing is a trade-off** - You trade some quality for cost savings
+4. **This is not magic** - Results depend heavily on your specific usage patterns
 
-**Who should use rigrun**:
-- Side projects burning cash on LLM APIs
-- Privacy-sensitive applications
-- Developers with underutilized GPUs
-- Teams looking to cut costs
+**Who might benefit from rigrun**:
+- Developers with GPUs sitting idle
+- Side projects where cost matters more than peak quality
+- Privacy-sensitive applications where local processing is preferred
+- Anyone curious about local LLM inference
 
-**Who shouldn't**:
-- Production apps requiring 100% GPT-4 quality
-- Users without GPUs (CPU inference is slow)
-- Enterprise-scale deployments (not yet)
+**Who probably shouldn't use this**:
+- Production apps requiring consistent GPT-4-level quality
+- Users without GPUs (CPU inference is painfully slow)
+- Enterprise-scale deployments
+- Anyone who needs guaranteed response quality
 
 ---
 
@@ -721,7 +727,7 @@ Drop a comment below or open an issue on GitHub!
 
 ---
 
-*Built with ❤️ and caffeine. Put your rig to work.*
+*An experiment in local-first LLM routing. Feedback welcome.*
 
 ---
 

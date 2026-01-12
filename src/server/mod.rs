@@ -23,7 +23,7 @@
 //! ```
 
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -65,6 +65,8 @@ pub struct ServerConfig {
     pub port: u16,
     /// Default model to use.
     pub default_model: String,
+    /// Address to bind to (defaults to 127.0.0.1 for security).
+    pub bind_address: String,
 }
 
 /// API server configuration.
@@ -78,6 +80,8 @@ pub struct Server {
     local_model: String,
     /// OpenRouter API key.
     openrouter_key: Option<String>,
+    /// Address to bind to (defaults to 127.0.0.1 for security).
+    bind_address: String,
 }
 
 impl Default for Server {
@@ -88,12 +92,14 @@ impl Default for Server {
 
 impl Server {
     /// Create a new server with the specified port.
+    /// By default, binds to 127.0.0.1 (localhost only) for security.
     pub fn new(port: u16) -> Self {
         Self {
             port,
             default_model: "auto".to_string(),
             local_model: "qwen2.5-coder:7b".to_string(),
             openrouter_key: None,
+            bind_address: "127.0.0.1".to_string(),
         }
     }
 
@@ -115,6 +121,13 @@ impl Server {
         self
     }
 
+    /// Set the bind address.
+    /// Use "0.0.0.0" to allow network access, "127.0.0.1" (default) for localhost only.
+    pub fn with_bind_address(mut self, addr: impl Into<String>) -> Self {
+        self.bind_address = addr.into();
+        self
+    }
+
     /// Build the router with all routes.
     pub fn build_router(&self) -> Router {
         // Initialize OpenRouter client with API key from config or environment
@@ -128,6 +141,7 @@ impl Server {
             config: ServerConfig {
                 port: self.port,
                 default_model: self.default_model.clone(),
+                bind_address: self.bind_address.clone(),
             },
             ollama_client: OllamaClient::new(),
             openrouter_client,
@@ -151,6 +165,7 @@ impl Server {
             .route("/v1/chat/completions", post(completions_handler))
             .route("/stats", get(stats_handler))
             .route("/cache/stats", get(cache_stats_handler))
+            .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
             .layer(GovernorLayer {
                 config: governor_conf,
             })
@@ -160,9 +175,17 @@ impl Server {
     /// Start the server with graceful shutdown.
     pub async fn start(&self) -> Result<()> {
         let router = self.build_router();
-        let addr = format!("0.0.0.0:{}", self.port);
+        let addr = format!("{}:{}", self.bind_address, self.port);
 
         tracing::info!("Starting server on {}", addr);
+
+        // Security warning if binding to all interfaces
+        if self.bind_address == "0.0.0.0" {
+            tracing::warn!(
+                "Server is binding to 0.0.0.0 which exposes the API to the network. \
+                Use 127.0.0.1 (default) for local-only access."
+            );
+        }
 
         let listener = tokio::net::TcpListener::bind(&addr).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::AddrInUse {
@@ -198,8 +221,11 @@ impl Server {
 /// Health check response.
 #[derive(Serialize)]
 struct HealthResponse {
-    status: &'static str,
+    status: String,
     version: &'static str,
+    ollama_status: String,
+    cache_entries: usize,
+    cache_hit_rate: f32,
 }
 
 /// Model information.
@@ -237,6 +263,10 @@ struct ChatCompletionRequest {
 // Maximum query length to prevent DoS attacks
 const MAX_QUERY_LENGTH: usize = 100_000; // 100KB
 const MAX_MESSAGE_COUNT: usize = 100;
+// Default timeout for Ollama calls (in seconds)
+const OLLAMA_TIMEOUT_SECS: u64 = 120;
+// Maximum request body size (1MB)
+const MAX_BODY_SIZE: usize = 1024 * 1024;
 
 /// Chat message.
 #[derive(Deserialize, Serialize, Clone)]
@@ -299,11 +329,50 @@ struct TodayStats {
 // =============================================================================
 
 /// Health check handler.
-async fn health_handler() -> Json<HealthResponse> {
+///
+/// Checks if Ollama is reachable and returns degraded status if not.
+async fn health_handler(
+    State(state): State<Arc<AppState>>,
+) -> Json<HealthResponse> {
+    // Check Ollama availability with a quick HTTP ping
+    let ollama_status = match check_ollama_health().await {
+        true => "ok".to_string(),
+        false => "unavailable".to_string(),
+    };
+
+    // Get cache stats
+    let (cache_entries, cache_hit_rate) = match state.cache.read() {
+        Ok(cache) => (cache.len(), cache.stats().hit_rate()),
+        Err(_) => (0, 0.0),
+    };
+
+    // Determine overall status
+    let status = if ollama_status == "ok" {
+        "ok".to_string()
+    } else {
+        "degraded".to_string()
+    };
+
     Json(HealthResponse {
-        status: "ok",
+        status,
         version: env!("CARGO_PKG_VERSION"),
+        ollama_status,
+        cache_entries,
+        cache_hit_rate,
     })
+}
+
+/// Check if Ollama is reachable with a quick HTTP ping.
+async fn check_ollama_health() -> bool {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+        .unwrap_or_default();
+
+    match client.get("http://localhost:11434/api/tags").send().await {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    }
 }
 
 /// List models handler.
@@ -405,12 +474,15 @@ async fn completions_handler(
 
     // Check cache first for Cache tier or auto-routed Cache tier
     if tier == Tier::Cache || request.model == "auto" {
-        let cache_result = {
-            let mut cache = state.cache.write().map_err(|e| {
-                tracing::error!("Cache lock error: {}", e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Cache lock error".to_string())
-            })?;
-            cache.check_and_record_hit(cache_key)
+        // Gracefully handle poisoned lock - recover and continue rather than crashing
+        let cache_result = match state.cache.write() {
+            Ok(mut cache) => cache.check_and_record_hit(cache_key),
+            Err(poisoned) => {
+                tracing::warn!("Cache lock was poisoned, recovering and continuing");
+                // Recover by getting the inner data despite the poison
+                let mut cache = poisoned.into_inner();
+                cache.check_and_record_hit(cache_key)
+            }
         };
 
         if let Some(cached) = cache_result {
@@ -480,18 +552,30 @@ async fn completions_handler(
     // Execute on appropriate tier
     let (response_text, prompt_tokens, completion_tokens, actual_tier) = match tier {
         Tier::Cache | Tier::Local => {
-            // Call Ollama for inference
-            let ollama_response = state
+            // Call Ollama for inference with timeout to prevent hanging
+            let ollama_future = state
                 .ollama_client
-                .chat_async(&state.local_model, messages)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Ollama error: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Ollama error: {}", e),
-                    )
-                })?;
+                .chat_async(&state.local_model, messages);
+
+            let ollama_response = tokio::time::timeout(
+                std::time::Duration::from_secs(OLLAMA_TIMEOUT_SECS),
+                ollama_future,
+            )
+            .await
+            .map_err(|_| {
+                tracing::error!("Ollama request timed out after {}s", OLLAMA_TIMEOUT_SECS);
+                (
+                    StatusCode::GATEWAY_TIMEOUT,
+                    format!("Ollama request timed out after {} seconds", OLLAMA_TIMEOUT_SECS),
+                )
+            })?
+            .map_err(|e| {
+                tracing::error!("Ollama error: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Ollama error: {}", e),
+                )
+            })?;
 
             (
                 ollama_response.response,
@@ -570,18 +654,28 @@ async fn completions_handler(
     };
 
     // Store response in cache for future hits
-    {
-        let mut cache = state.cache.write().map_err(|e| {
-            tracing::error!("Cache lock error: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Cache lock error".to_string())
-        })?;
-        cache.store(
-            cache_key,
-            response_text.clone(),
-            actual_tier,
-            prompt_tokens + completion_tokens,
-        );
-        tracing::debug!("Stored response in cache (entries: {})", cache.len());
+    // Gracefully handle poisoned lock - skip caching rather than crashing
+    match state.cache.write() {
+        Ok(mut cache) => {
+            cache.store(
+                cache_key,
+                response_text.clone(),
+                actual_tier,
+                prompt_tokens + completion_tokens,
+            );
+            tracing::debug!("Stored response in cache (entries: {})", cache.len());
+        }
+        Err(poisoned) => {
+            tracing::warn!("Cache lock was poisoned, recovering and storing response");
+            let mut cache = poisoned.into_inner();
+            cache.store(
+                cache_key,
+                response_text.clone(),
+                actual_tier,
+                prompt_tokens + completion_tokens,
+            );
+            tracing::debug!("Stored response in cache after recovery (entries: {})", cache.len());
+        }
     }
 
     let total_tokens = prompt_tokens + completion_tokens;
@@ -693,23 +787,31 @@ struct CacheStatsResponse {
 /// Cache stats handler.
 async fn cache_stats_handler(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<CacheStatsResponse>, (StatusCode, String)> {
-    let cache = state.cache.read().map_err(|e| {
-        tracing::error!("Cache lock error: {}", e);
-        (StatusCode::INTERNAL_SERVER_ERROR, "Cache lock error".to_string())
-    })?;
+) -> Json<CacheStatsResponse> {
+    // Gracefully handle poisoned lock - return default stats rather than error
+    let (entries, total_lookups, hits, misses, expired_skips, total_stores, hit_rate, ttl_hours) = match state.cache.read() {
+        Ok(cache) => {
+            let stats = cache.stats();
+            (cache.len(), stats.total_lookups, stats.hits, stats.misses, stats.expired_skips, stats.total_stores, stats.hit_rate(), cache.ttl_hours())
+        }
+        Err(poisoned) => {
+            tracing::warn!("Cache lock was poisoned, recovering to read stats");
+            let cache = poisoned.into_inner();
+            let stats = cache.stats();
+            (cache.len(), stats.total_lookups, stats.hits, stats.misses, stats.expired_skips, stats.total_stores, stats.hit_rate(), cache.ttl_hours())
+        }
+    };
 
-    let stats = cache.stats();
-    Ok(Json(CacheStatsResponse {
-        entries: cache.len(),
-        total_lookups: stats.total_lookups,
-        hits: stats.hits,
-        misses: stats.misses,
-        expired_skips: stats.expired_skips,
-        total_stores: stats.total_stores,
-        hit_rate_percent: stats.hit_rate(),
-        ttl_hours: cache.ttl_hours(),
-    }))
+    Json(CacheStatsResponse {
+        entries,
+        total_lookups,
+        hits,
+        misses,
+        expired_skips,
+        total_stores,
+        hit_rate_percent: hit_rate,
+        ttl_hours,
+    })
 }
 
 // =============================================================================
@@ -728,16 +830,28 @@ fn map_tier_to_stats(tier: Tier) -> stats::Tier {
     }
 }
 
-/// Generate a simple UUID v4 (good enough for response IDs).
+/// Generate a proper random UUID v4 for response IDs.
 fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use rand::Rng;
 
-    let time = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
+    let mut rng = rand::thread_rng();
 
-    format!("{:032x}", time)
+    // Generate 16 random bytes
+    let mut bytes = [0u8; 16];
+    rng.fill(&mut bytes);
+
+    // Set version (4) and variant (RFC 4122) bits
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant RFC 4122
+
+    // Format as UUID string (without hyphens for compact response IDs)
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11],
+        bytes[12], bytes[13], bytes[14], bytes[15]
+    )
 }
 
 /// Graceful shutdown signal handler.

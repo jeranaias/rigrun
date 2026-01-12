@@ -56,6 +56,9 @@ indexmap = { version = "2.0", features = ["serde"] }
 # Terminal manipulation for live stats
 crossterm = "0.27"
 
+# Random number generation for UUIDs
+rand = "0.8"
+
 [[bin]]
 name = "rigrun"
 path = "src/main.rs"
