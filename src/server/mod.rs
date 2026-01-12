@@ -8,7 +8,9 @@
 //! - `GET /health` - Health check
 //! - `GET /v1/models` - List available models
 //! - `POST /v1/chat/completions` - Chat completion (OpenAI-compatible)
-//! - `GET /stats` - Usage statistics
+//! - `GET /stats` - Usage statistics (includes semantic cache metrics)
+//! - `GET /cache/stats` - Exact-match cache statistics
+//! - `GET /cache/semantic` - Semantic cache statistics
 //!
 //! # Example
 //!
@@ -30,7 +32,8 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use std::time::Instant;
 use anyhow::Result;
 use tower_governor::{
@@ -39,7 +42,7 @@ use tower_governor::{
     GovernorLayer,
 };
 use crate::audit;
-use crate::cache::QueryCache;
+use crate::cache::semantic::SemanticCache;
 use crate::local::{OllamaClient, Message};
 use crate::router::{route_query, Tier};
 use crate::stats;
@@ -56,7 +59,7 @@ pub struct AppState {
     /// Default local model name.
     pub local_model: String,
     /// Query cache for semantic caching.
-    pub cache: RwLock<QueryCache>,
+    pub cache: RwLock<SemanticCache>,
     /// Paranoid mode: block all cloud requests.
     pub paranoid_mode: bool,
 }
@@ -152,6 +155,14 @@ impl Server {
             OpenRouterClient::new() // Will try OPENROUTER_API_KEY env var
         };
 
+        // Create SemanticCache with QueryCache's default persistent settings
+        // Use 0.80 similarity threshold (80% similarity required for semantic matches)
+        let semantic_cache = {
+            use crate::cache::QueryCache;
+            let exact_cache = QueryCache::default_persistent();
+            SemanticCache::with_cache(exact_cache, 0.80)
+        };
+
         let state = Arc::new(AppState {
             config: ServerConfig {
                 port: self.port,
@@ -162,7 +173,7 @@ impl Server {
             ollama_client: OllamaClient::new(),
             openrouter_client,
             local_model: self.local_model.clone(),
-            cache: RwLock::new(QueryCache::default_persistent()),
+            cache: RwLock::new(semantic_cache),
             paranoid_mode: self.paranoid_mode,
         });
 
@@ -182,6 +193,7 @@ impl Server {
             .route("/v1/chat/completions", post(completions_handler))
             .route("/stats", get(stats_handler))
             .route("/cache/stats", get(cache_stats_handler))
+            .route("/cache/semantic", get(semantic_cache_stats_handler))
             .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
             .layer(GovernorLayer {
                 config: governor_conf,
@@ -328,6 +340,8 @@ struct UsageInfo {
 struct StatsResponse {
     session: SessionStatsInfo,
     today: TodayStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    semantic_cache: Option<SemanticCacheMetrics>,
 }
 
 #[derive(Serialize)]
@@ -343,6 +357,15 @@ struct TodayStats {
     queries: u64,
     saved_usd: f64,
     spent_usd: f64,
+}
+
+#[derive(Serialize)]
+struct SemanticCacheMetrics {
+    semantic_hits: u64,
+    exact_hits: u64,
+    semantic_hit_rate: f32,
+    total_hit_rate: f32,
+    embedding_failures: u64,
 }
 
 // =============================================================================
@@ -362,10 +385,9 @@ async fn health_handler(
     };
 
     // Get cache stats
-    let (cache_entries, cache_hit_rate) = match state.cache.read() {
-        Ok(cache) => (cache.len(), cache.stats().hit_rate()),
-        Err(_) => (0, 0.0),
-    };
+    let cache = state.cache.read().await;
+    let stats = cache.stats();
+    let (cache_entries, cache_hit_rate) = (cache.len(), stats.total_hit_rate);
 
     // Determine overall status
     let status = if ollama_status == "ok" {
@@ -478,6 +500,68 @@ async fn completions_handler(
         .map(|m| m.content.as_str())
         .unwrap_or("");
 
+    // Check cache first for ALL requests (semantic cache with similarity matching)
+    // This allows cache hits even when users explicitly request local/cloud tiers
+    let mut cache = state.cache.write().await;
+    let cache_result = cache.get(cache_key).await;
+
+    if let Some(cached) = cache_result {
+        // Release cache lock before returning
+        drop(cache);
+
+        let latency_ms = start_time.elapsed().as_millis() as u64;
+        tracing::info!("Cache hit for query (hit_count: {}, age: {:.1}h)",
+            cached.hit_count, cached.age_hours());
+
+        // Record cache hit to stats tracker
+        let query_stats = stats::QueryStats::new(
+            stats::Tier::Cache,
+            0, // No tokens for cache hit
+            0,
+            latency_ms,
+        );
+        tracing::info!("Recording cache hit, latency={}ms", latency_ms);
+        stats::record_query(query_stats);
+
+        // Persist stats to disk after recording
+        if let Err(e) = stats::persist_stats() {
+            tracing::warn!("Failed to persist stats: {}", e);
+        } else {
+            let session_stats = stats::get_session_stats();
+            tracing::debug!(
+                "Stats persisted. Session: {} queries (cache hits: {})",
+                session_stats.total_queries,
+                session_stats.cache_hits
+            );
+        }
+
+        return Ok(Json(ChatCompletionResponse {
+            id: format!("chatcmpl-{}", uuid_v4()),
+            object: "chat.completion",
+            created: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            model: "cache".to_string(),
+            choices: vec![ChatChoice {
+                index: 0,
+                message: ChatMessage {
+                    role: "assistant".to_string(),
+                    content: cached.response,
+                },
+                finish_reason: "stop".to_string(),
+            }],
+            usage: UsageInfo {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            },
+        }));
+    }
+
+    // Cache miss - release lock before executing query on the selected tier
+    drop(cache);
+
     // Determine which tier to use based on the requested model
     let tier = match request.model.as_str() {
         "auto" => {
@@ -493,74 +577,9 @@ async fn completions_handler(
         _ => Tier::Local, // Default to local for unknown models
     };
 
-    // Check cache first for Cache tier or auto-routed Cache tier
-    if tier == Tier::Cache || request.model == "auto" {
-        // Gracefully handle poisoned lock - recover and continue rather than crashing
-        let cache_result = match state.cache.write() {
-            Ok(mut cache) => cache.check_and_record_hit(cache_key),
-            Err(poisoned) => {
-                tracing::warn!("Cache lock was poisoned, recovering and continuing");
-                // Recover by getting the inner data despite the poison
-                let mut cache = poisoned.into_inner();
-                cache.check_and_record_hit(cache_key)
-            }
-        };
-
-        if let Some(cached) = cache_result {
-            let latency_ms = start_time.elapsed().as_millis() as u64;
-            tracing::info!("Cache hit for query (hit_count: {}, age: {:.1}h)",
-                cached.hit_count, cached.age_hours());
-
-            // Record cache hit to stats tracker
-            let query_stats = stats::QueryStats::new(
-                stats::Tier::Cache,
-                0, // No tokens for cache hit
-                0,
-                latency_ms,
-            );
-            tracing::info!("Recording cache hit, latency={}ms", latency_ms);
-            stats::record_query(query_stats);
-
-            // Persist stats to disk after recording
-            if let Err(e) = stats::persist_stats() {
-                tracing::warn!("Failed to persist stats: {}", e);
-            } else {
-                let session_stats = stats::get_session_stats();
-                tracing::debug!(
-                    "Stats persisted. Session: {} queries (cache hits: {})",
-                    session_stats.total_queries,
-                    session_stats.cache_hits
-                );
-            }
-
-            return Ok(Json(ChatCompletionResponse {
-                id: format!("chatcmpl-{}", uuid_v4()),
-                object: "chat.completion",
-                created: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-                model: "cache".to_string(),
-                choices: vec![ChatChoice {
-                    index: 0,
-                    message: ChatMessage {
-                        role: "assistant".to_string(),
-                        content: cached.response,
-                    },
-                    finish_reason: "stop".to_string(),
-                }],
-                usage: UsageInfo {
-                    prompt_tokens: 0,
-                    completion_tokens: 0,
-                    total_tokens: 0,
-                },
-            }));
-        }
-
-        // If explicitly requested cache tier but no hit, fall back to Local
-        if tier == Tier::Cache {
-            tracing::debug!("Cache miss, falling back to Local tier");
-        }
+    // If explicitly requested cache tier but had cache miss, fall back to Local
+    if tier == Tier::Cache {
+        tracing::debug!("Cache miss for explicit cache tier request, falling back to Local tier");
     }
 
     // Convert request messages to the format expected by OllamaClient
@@ -695,29 +714,14 @@ async fn completions_handler(
     };
 
     // Store response in cache for future hits
-    // Gracefully handle poisoned lock - skip caching rather than crashing
-    match state.cache.write() {
-        Ok(mut cache) => {
-            cache.store(
-                cache_key,
-                response_text.clone(),
-                actual_tier,
-                prompt_tokens + completion_tokens,
-            );
-            tracing::debug!("Stored response in cache (entries: {})", cache.len());
-        }
-        Err(poisoned) => {
-            tracing::warn!("Cache lock was poisoned, recovering and storing response");
-            let mut cache = poisoned.into_inner();
-            cache.store(
-                cache_key,
-                response_text.clone(),
-                actual_tier,
-                prompt_tokens + completion_tokens,
-            );
-            tracing::debug!("Stored response in cache after recovery (entries: {})", cache.len());
-        }
-    }
+    let mut cache = state.cache.write().await;
+    cache.store_response(
+        cache_key,
+        response_text.clone(),
+        actual_tier,
+        prompt_tokens + completion_tokens,
+    ).await;
+    tracing::debug!("Stored response in semantic cache (entries: {})", cache.len());
 
     let total_tokens = prompt_tokens + completion_tokens;
     let latency_ms = start_time.elapsed().as_millis() as u64;
@@ -781,7 +785,9 @@ async fn completions_handler(
 }
 
 /// Stats handler.
-async fn stats_handler() -> Json<StatsResponse> {
+async fn stats_handler(
+    State(state): State<Arc<AppState>>,
+) -> Json<StatsResponse> {
     // Get session stats (current session, in-memory)
     let session = stats::get_session_stats();
 
@@ -801,6 +807,17 @@ async fn stats_handler() -> Json<StatsResponse> {
         .map(|d| (d.queries as u64, d.spent))
         .unwrap_or((0, 0.0));
 
+    // Get semantic cache stats if available
+    let cache = state.cache.read().await;
+    let stats = cache.stats();
+    let semantic_cache = Some(SemanticCacheMetrics {
+        semantic_hits: stats.semantic_hits,
+        exact_hits: stats.exact_hits,
+        semantic_hit_rate: stats.semantic_hit_rate,
+        total_hit_rate: stats.total_hit_rate,
+        embedding_failures: stats.embedding_failures,
+    });
+
     Json(StatsResponse {
         session: SessionStatsInfo {
             queries: session.total_queries as u64,
@@ -813,6 +830,7 @@ async fn stats_handler() -> Json<StatsResponse> {
             saved_usd: today_saved,
             spent_usd: today_spent,
         },
+        semantic_cache,
     })
 }
 
@@ -821,41 +839,71 @@ async fn stats_handler() -> Json<StatsResponse> {
 struct CacheStatsResponse {
     entries: usize,
     total_lookups: u64,
-    hits: u64,
+    semantic_hits: u64,
+    exact_hits: u64,
     misses: u64,
-    expired_skips: u64,
-    total_stores: u64,
-    hit_rate_percent: f32,
-    ttl_hours: u32,
+    embedding_failures: u64,
+    semantic_hit_rate_percent: f32,
+    total_hit_rate_percent: f32,
+    vector_index_entries: usize,
 }
 
 /// Cache stats handler.
 async fn cache_stats_handler(
     State(state): State<Arc<AppState>>,
 ) -> Json<CacheStatsResponse> {
-    // Gracefully handle poisoned lock - return default stats rather than error
-    let (entries, total_lookups, hits, misses, expired_skips, total_stores, hit_rate, ttl_hours) = match state.cache.read() {
-        Ok(cache) => {
-            let stats = cache.stats();
-            (cache.len(), stats.total_lookups, stats.hits, stats.misses, stats.expired_skips, stats.total_stores, stats.hit_rate(), cache.ttl_hours())
-        }
-        Err(poisoned) => {
-            tracing::warn!("Cache lock was poisoned, recovering to read stats");
-            let cache = poisoned.into_inner();
-            let stats = cache.stats();
-            (cache.len(), stats.total_lookups, stats.hits, stats.misses, stats.expired_skips, stats.total_stores, stats.hit_rate(), cache.ttl_hours())
-        }
-    };
+    let cache = state.cache.read().await;
+    let stats = cache.stats();
+    let entries = cache.len();
+    let vector_index_entries = cache.vector_index_len();
+    let total_lookups = stats.total_lookups;
+    let semantic_hits = stats.semantic_hits;
+    let exact_hits = stats.exact_hits;
+    let misses = stats.misses;
+    let embedding_failures = stats.embedding_failures;
+    let semantic_hit_rate = stats.semantic_hit_rate;
+    let total_hit_rate = stats.total_hit_rate;
 
     Json(CacheStatsResponse {
         entries,
         total_lookups,
-        hits,
+        semantic_hits,
+        exact_hits,
         misses,
-        expired_skips,
-        total_stores,
-        hit_rate_percent: hit_rate,
-        ttl_hours,
+        embedding_failures,
+        semantic_hit_rate_percent: semantic_hit_rate,
+        total_hit_rate_percent: total_hit_rate,
+        vector_index_entries,
+    })
+}
+
+/// Semantic cache statistics response.
+#[derive(Serialize)]
+struct SemanticCacheStatsResponse {
+    total_lookups: u64,
+    semantic_hits: u64,
+    exact_hits: u64,
+    misses: u64,
+    semantic_hit_rate: f32,
+    total_hit_rate: f32,
+    embedding_failures: u64,
+}
+
+/// Semantic cache stats handler.
+async fn semantic_cache_stats_handler(
+    State(state): State<Arc<AppState>>,
+) -> Json<SemanticCacheStatsResponse> {
+    let cache = state.cache.read().await;
+    let semantic_stats = cache.stats();
+
+    Json(SemanticCacheStatsResponse {
+        total_lookups: semantic_stats.total_lookups,
+        semantic_hits: semantic_stats.semantic_hits,
+        exact_hits: semantic_stats.exact_hits,
+        misses: semantic_stats.misses,
+        semantic_hit_rate: semantic_stats.semantic_hit_rate,
+        total_hit_rate: semantic_stats.total_hit_rate,
+        embedding_failures: semantic_stats.embedding_failures,
     })
 }
 
