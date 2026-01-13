@@ -24,6 +24,9 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+// Re-export Message from types for API compatibility
+pub use crate::types::Message;
+
 /// Default OpenRouter API endpoint.
 const DEFAULT_OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 
@@ -46,40 +49,6 @@ pub struct OpenRouterResponse {
 }
 
 
-/// A chat message for the chat completion API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    /// The role of the message sender.
-    pub role: String,
-    /// The content of the message.
-    pub content: String,
-}
-
-impl Message {
-    /// Create a new message.
-    pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            role: role.into(),
-            content: content.into(),
-        }
-    }
-
-    /// Create a system message.
-    pub fn system(content: impl Into<String>) -> Self {
-        Self::new("system", content)
-    }
-
-    /// Create a user message.
-    pub fn user(content: impl Into<String>) -> Self {
-        Self::new("user", content)
-    }
-
-    /// Create an assistant message.
-    pub fn assistant(content: impl Into<String>) -> Self {
-        Self::new("assistant", content)
-    }
-}
-
 /// Error types specific to OpenRouter operations.
 #[derive(Debug, Clone)]
 pub enum OpenRouterError {
@@ -100,12 +69,48 @@ pub enum OpenRouterError {
 impl std::fmt::Display for OpenRouterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotConfigured(msg) => write!(f, "OpenRouter not configured: {}", msg),
-            Self::AuthError(msg) => write!(f, "Authentication error: {}", msg),
-            Self::RateLimited(msg) => write!(f, "Rate limited: {}", msg),
-            Self::ModelNotFound(model) => write!(f, "Model not found: {}", model),
-            Self::ApiError(msg) => write!(f, "API error: {}", msg),
-            Self::NetworkError(msg) => write!(f, "Network error: {}", msg),
+            Self::NotConfigured(msg) => {
+                let error = format!(
+                    "[✗] OpenRouter not configured\n\n{}\n\nPossible causes:\n  - OPENROUTER_API_KEY environment variable not set\n  - API key not added to rigrun config\n  - API key was deleted or reset\n\nTry these fixes:\n  1. Get an API key: https://openrouter.ai/keys\n  2. Set it: export OPENROUTER_API_KEY=sk-or-...\n  3. Or configure: rigrun config set openrouter_api_key sk-or-...\n  4. Verify: rigrun config show\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
+            Self::AuthError(msg) => {
+                let error = format!(
+                    "[✗] Authentication failed\n\n{}\n\nPossible causes:\n  - Invalid or expired API key\n  - API key was revoked\n  - Incorrect API key format\n  - Account suspended\n\nTry these fixes:\n  1. Verify your API key at: https://openrouter.ai/keys\n  2. Generate a new key if needed\n  3. Update config: rigrun config set openrouter_api_key sk-or-...\n  4. Check account status: https://openrouter.ai/account\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
+            Self::RateLimited(msg) => {
+                let error = format!(
+                    "[✗] Rate limit exceeded\n\n{}\n\nPossible causes:\n  - Too many requests in short time\n  - Free tier limit reached\n  - Account quota exceeded\n  - Shared IP address issue\n\nTry these fixes:\n  1. Wait 60 seconds and try again\n  2. Add credits to account: https://openrouter.ai/credits\n  3. Use a slower model to reduce costs\n  4. Check your usage: https://openrouter.ai/activity\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
+            Self::ModelNotFound(model) => {
+                let error = format!(
+                    "[✗] Model not found: {}\n\nPossible causes:\n  - Model name misspelled\n  - Model was deprecated or removed\n  - Model ID format incorrect\n  - Model not available in your region\n\nTry these fixes:\n  1. List available models: rigrun models\n  2. Check model name spelling\n  3. Browse models: https://openrouter.ai/models\n  4. Try a popular model: anthropic/claude-3-haiku\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    model
+                );
+                write!(f, "{}", error)
+            }
+            Self::ApiError(msg) => {
+                let error = format!(
+                    "[✗] OpenRouter API error\n\n{}\n\nPossible causes:\n  - OpenRouter service temporarily down\n  - Invalid request format\n  - Model overloaded or unavailable\n  - Account issue\n\nTry these fixes:\n  1. Check OpenRouter status: https://status.openrouter.ai\n  2. Try a different model\n  3. Wait a moment and retry\n  4. Check account: https://openrouter.ai/account\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
+            Self::NetworkError(msg) => {
+                let error = format!(
+                    "[✗] Network error\n\n{}\n\nPossible causes:\n  - No internet connection\n  - DNS resolution failure\n  - Firewall blocking HTTPS\n  - Proxy or VPN interference\n\nTry these fixes:\n  1. Check internet connection\n  2. Verify DNS: ping openrouter.ai\n  3. Check firewall settings\n  4. Disable VPN temporarily\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
         }
     }
 }
@@ -214,11 +219,16 @@ impl OpenRouterClient {
     }
 
     /// Create a new OpenRouter client with an optional API key.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the HTTP client cannot be built. This should only happen if the system's
+    /// TLS/SSL stack is fundamentally broken. This is acceptable for initialization code.
     fn with_api_key_option(api_key: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
             .build()
-            .expect("Failed to create HTTP client");
+            .expect("Failed to create HTTP client for OpenRouter. This indicates a critical system configuration issue (TLS/SSL failure).");
 
         Self {
             api_key,
@@ -320,7 +330,7 @@ impl OpenRouterClient {
     pub async fn chat(&self, model: &str, messages: Vec<Message>) -> Result<OpenRouterResponse> {
         let api_key = self.api_key.as_ref()
             .ok_or_else(|| anyhow!(OpenRouterError::NotConfigured(
-                "Set OPENROUTER_API_KEY environment variable or configure via rigrun config".to_string()
+                "API key is not set.".to_string()
             )))?;
 
         let url = format!("{}/chat/completions", self.base_url);
@@ -351,10 +361,13 @@ impl OpenRouterClient {
             .map_err(|e| {
                 if e.is_timeout() {
                     anyhow!(OpenRouterError::NetworkError(
-                        "Request timed out. Consider using a faster model.".to_string()
+                        "Request timed out.".to_string()
                     ))
                 } else {
-                    anyhow!(OpenRouterError::NetworkError(e.to_string()))
+                    anyhow!(OpenRouterError::NetworkError(format!(
+                        "Failed to connect to OpenRouter: {}",
+                        e
+                    )))
                 }
             })?;
 
@@ -365,12 +378,12 @@ impl OpenRouterClient {
 
             if status.as_u16() == 401 {
                 return Err(anyhow!(OpenRouterError::AuthError(
-                    "Invalid API key. Check your OPENROUTER_API_KEY.".to_string()
+                    "Invalid API key.".to_string()
                 )));
             }
             if status.as_u16() == 429 {
                 return Err(anyhow!(OpenRouterError::RateLimited(
-                    "Rate limit exceeded. Wait a moment and try again.".to_string()
+                    "Too many requests.".to_string()
                 )));
             }
             if status.as_u16() == 404 || error_text.contains("not found") {

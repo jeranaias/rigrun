@@ -418,8 +418,8 @@ curl http://localhost:8787/v1/chat/completions \
 
 - [rigrun Documentation](https://github.com/rigrun/rigrun/docs)
 - [LiteLLM Documentation](https://docs.litellm.ai)
-- [rigrun Quick Start](QUICKSTART.md)
-- [rigrun API Reference](API.md)
+- [rigrun Quick Start](getting-started.md)
+- [rigrun API Reference](api-reference.md)
 
 ---
 

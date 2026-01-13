@@ -1,11 +1,11 @@
 //! Integration tests for rigrun server
 //!
 //! These tests verify the full request flow works correctly by hitting the live server.
-//! They are marked with #[ignore] so they don't run in CI without a server running.
+//! Set SKIP_INTEGRATION_TESTS=1 to skip these tests in CI environments.
 //!
 //! To run these tests:
 //! 1. Start the rigrun server: rigrun
-//! 2. Run tests with: cargo test --test integration_tests -- --ignored
+//! 2. Run tests with: cargo test --test integration_tests
 
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -15,8 +15,13 @@ use serde_json::{json, Value};
 // =============================================================================
 
 #[tokio::test]
-#[ignore]
 async fn test_health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = reqwest::Client::new();
     let response = client.get("http://localhost:8787/health").send().await?;
 
@@ -34,8 +39,13 @@ async fn test_health_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 // =============================================================================
 
 #[tokio::test]
-#[ignore]
 async fn test_models_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = Client::new();
     let res = client
         .get("http://localhost:8787/v1/models")
@@ -71,8 +81,13 @@ async fn test_models_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 // =============================================================================
 
 #[tokio::test]
-#[ignore]
 async fn test_cache_stats_endpoint() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = reqwest::Client::new();
     let response = client
         .get("http://localhost:8787/cache/stats")
@@ -100,8 +115,13 @@ async fn test_cache_stats_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 // =============================================================================
 
 #[tokio::test]
-#[ignore]
 async fn test_query_routing() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = Client::new();
     let request_body = json!({
         "model": "auto",
@@ -140,8 +160,13 @@ async fn test_query_routing() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_query_routing_local() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = Client::new();
     let request_body = json!({
         "model": "local",
@@ -173,8 +198,13 @@ async fn test_query_routing_local() -> Result<(), Box<dyn std::error::Error>> {
 // =============================================================================
 
 #[tokio::test]
-#[ignore]
 async fn test_stats_tracking() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = reqwest::Client::new();
 
     // Get initial stats
@@ -239,8 +269,13 @@ async fn test_stats_tracking() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_stats_endpoint_structure() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = reqwest::Client::new();
 
     let response = client
@@ -273,8 +308,13 @@ async fn test_stats_endpoint_structure() -> Result<(), Box<dyn std::error::Error
 // =============================================================================
 
 #[tokio::test]
-#[ignore]
 async fn test_cache_hit_behavior() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip if integration tests disabled (for CI)
+    if std::env::var("SKIP_INTEGRATION_TESTS").is_ok() {
+        println!("Skipping integration test (SKIP_INTEGRATION_TESTS set)");
+        return Ok(());
+    }
+
     let client = Client::new();
 
     // Make the same request twice to test cache behavior

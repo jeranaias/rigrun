@@ -3136,6 +3136,7 @@ mod tests {
             CpuFallbackCause::AmdNeedsCustomOllama { gfx_version } => {
                 assert!(gfx_version.starts_with("gfx12"));
             }
+            // NOTE: This panic is acceptable - it's in test code, not production
             _ => panic!("Expected AmdNeedsCustomOllama for RDNA 4 GPU"),
         }
 

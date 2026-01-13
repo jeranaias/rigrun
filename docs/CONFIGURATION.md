@@ -603,6 +603,6 @@ If changes aren't taking effect:
 ---
 
 For more information:
-- [Quick Start Guide](QUICKSTART.md)
-- [API Reference](API.md)
+- [Quick Start Guide](getting-started.md)
+- [API Reference](api-reference.md)
 - [Main README](../README.md)

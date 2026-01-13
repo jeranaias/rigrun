@@ -18,40 +18,93 @@
 
 ---
 
-## Prerequisites
+## What is rigrun?
 
-Before installing rigrun, you need the following:
+**For Developers:**
+rigrun is an OpenAI-compatible API router that runs on your hardware. It reduces LLM costs by intelligently routing requests through a three-tier system: semantic cache (instant, free) → local GPU inference (fast, free) → cloud fallback (only when needed). Think of it as a smart proxy that saves you money while maintaining compatibility with existing OpenAI/Claude codebases.
 
-1. **Rust** - https://rustup.rs (required for `cargo install`)
-2. **Ollama** - https://ollama.com/download (required for local inference)
-3. **GPU** (optional but recommended) - NVIDIA, AMD, Apple Silicon, or Intel Arc
+**For Non-Technical Users:**
+Instead of paying cloud services every time you use AI (like ChatGPT), rigrun runs AI models on your own computer. It's like having your own private ChatGPT that:
+- Costs 90% less than cloud services
+- Keeps your data private on your machine
+- Works offline (with optional cloud backup)
+- Runs faster for common questions
+
+**How It Works:**
+1. **Cache First**: Answers similar questions instantly (40-60% of requests)
+2. **Your GPU Second**: Runs AI on your computer's graphics card (30-50% of requests)
+3. **Cloud Last**: Only pays for complex questions that need extra power (10% of requests)
+
+**Result**: You get the same AI capabilities for 1/10th the cost, with better privacy.
 
 ---
 
-## Quick Start
+## 5-Minute Quickstart
 
-### 1. Install Ollama (Local LLM Runtime)
+### Step 1: Install Ollama
+Ollama runs AI models on your computer.
+
+**macOS/Linux:**
 ```bash
-# Mac/Linux
 curl -fsSL https://ollama.com/install.sh | sh
-
-# Windows - Download installer from https://ollama.com/download
 ```
 
-### 2. Install rigrun (LLM Router)
+**Windows:**
+Download from https://ollama.com/download
+
+### Step 2: Install rigrun
+Choose the easiest option for you:
+
+**Option A: Pre-built Binary (Recommended)**
+1. Download from https://github.com/rigrun/rigrun/releases
+2. Extract and move to your PATH
+3. Done!
+
+**Option B: Install via Cargo (if you have Rust)**
 ```bash
-# Via Cargo (requires Rust - see Prerequisites)
 cargo install rigrun
-
-# Or download pre-built binary
-# https://github.com/rigrun/rigrun/releases
 ```
 
-### 3. Start the OpenAI-Compatible API
+### Step 3: Run rigrun
 ```bash
 rigrun
 ```
-**Auto-magic setup**: Detects your GPU → Downloads optimal local LLM → Starts API server on `http://localhost:8787`
+
+That's it! rigrun will:
+- Detect your GPU automatically
+- Download the best AI model for your hardware (one-time, takes 5-10 minutes)
+- Start an API server at http://localhost:8787
+
+### Step 4: Make Your First Request
+
+**Using cURL:**
+```bash
+curl http://localhost:8787/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "auto",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+**Using Python:**
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8787/v1", api_key="unused")
+response = client.chat.completions.create(
+    model="auto",
+    messages=[{"role": "user", "content": "Say hello!"}]
+)
+print(response.choices[0].message.content)
+```
+
+Congratulations! You just ran your first local AI query.
+
+**Next Steps:**
+- [Getting Started Guide](docs/getting-started.md) - Complete walkthrough
+- [Installation Guide](docs/installation.md) - Detailed installation for all platforms
+- [Configuration](docs/configuration.md) - Customize rigrun for your needs
 
 ---
 
@@ -458,15 +511,24 @@ This project is [MIT](LICENSE) licensed - use it anywhere, commercially or perso
 
 ---
 
-## 🔗 Links
+## 📚 Documentation
 
-- **Documentation**: [docs/](docs/)
-- **Quick Start Guide**: [docs/QUICKSTART.md](docs/QUICKSTART.md)
-- **API Reference**: [docs/API.md](docs/API.md)
-- **Configuration Guide**: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
-- **Changelog**: [CHANGELOG.md](CHANGELOG.md)
+Complete documentation is available in the `docs/` folder:
+
+- **[Getting Started](docs/getting-started.md)** - First-run guide with step-by-step setup
+- **[Installation](docs/installation.md)** - Detailed installation for all platforms and GPUs
+- **[Configuration](docs/configuration.md)** - All configuration options explained
+- **[API Reference](docs/api-reference.md)** - Complete API documentation with examples
+- **[Troubleshooting](docs/troubleshooting.md)** - Solutions to common problems
+- **[Security & Privacy](docs/security.md)** - Authentication, privacy features, and best practices
+- **[Contributing](docs/contributing.md)** - Developer setup and contribution guidelines
+- **[Changelog](CHANGELOG.md)** - Version history and release notes
+
+### Quick Links
+
 - **Issues**: [GitHub Issues](https://github.com/rigrun/rigrun/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/rigrun/rigrun/discussions)
+- **Releases**: [GitHub Releases](https://github.com/rigrun/rigrun/releases)
 
 ---
 

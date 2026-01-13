@@ -25,6 +25,9 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+// Re-export Message from types for API compatibility
+pub use crate::types::Message;
+
 /// Default Ollama endpoint.
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
@@ -51,40 +54,6 @@ pub struct OllamaResponse {
 }
 
 
-/// A chat message for the chat completion API.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    /// The role of the message sender (e.g., "system", "user", "assistant").
-    pub role: String,
-    /// The content of the message.
-    pub content: String,
-}
-
-impl Message {
-    /// Create a new message.
-    pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            role: role.into(),
-            content: content.into(),
-        }
-    }
-
-    /// Create a system message.
-    pub fn system(content: impl Into<String>) -> Self {
-        Self::new("system", content)
-    }
-
-    /// Create a user message.
-    pub fn user(content: impl Into<String>) -> Self {
-        Self::new("user", content)
-    }
-
-    /// Create an assistant message.
-    pub fn assistant(content: impl Into<String>) -> Self {
-        Self::new("assistant", content)
-    }
-}
-
 /// Error types specific to Ollama operations.
 #[derive(Debug, Clone)]
 pub enum OllamaError {
@@ -103,11 +72,41 @@ pub enum OllamaError {
 impl std::fmt::Display for OllamaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NotRunning(msg) => write!(f, "Ollama is not running: {}", msg),
-            Self::Timeout(msg) => write!(f, "Request timed out: {}", msg),
-            Self::ModelNotFound(model) => write!(f, "Model not found: {}", model),
-            Self::ApiError(msg) => write!(f, "Ollama API error: {}", msg),
-            Self::NetworkError(msg) => write!(f, "Network error: {}", msg),
+            Self::NotRunning(msg) => {
+                let error = format!(
+                    "[✗] Failed to connect to Ollama\n\n{}\n\nPossible causes:\n  - Ollama service not running\n  - Ollama not installed\n  - Wrong Ollama URL in config\n  - Firewall blocking connection\n\nTry these fixes:\n  1. Start Ollama: ollama serve\n  2. Check if installed: ollama --version\n  3. Verify service: curl http://localhost:11434/api/tags\n  4. Check config: rigrun config show\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
+            Self::Timeout(msg) => {
+                let error = format!(
+                    "[✗] Request timed out\n\n{}\n\nPossible causes:\n  - Model is too large for available resources\n  - System running out of RAM or VRAM\n  - Network latency to Ollama server\n  - Ollama server overloaded\n\nTry these fixes:\n  1. Use a smaller model: ollama pull qwen2.5-coder:1.5b\n  2. Close other applications to free memory\n  3. Check system resources: rigrun doctor\n  4. Increase timeout if using remote Ollama\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
+            Self::ModelNotFound(model) => {
+                let error = format!(
+                    "[✗] Model not found: {}\n\nPossible causes:\n  - Model not downloaded yet\n  - Model name misspelled\n  - Model deleted from local storage\n\nTry these fixes:\n  1. Pull the model: ollama pull {}\n  2. List available models: ollama list\n  3. Check model name spelling\n  4. Pull a popular model: ollama pull qwen2.5-coder:7b\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    model, model
+                );
+                write!(f, "{}", error)
+            }
+            Self::ApiError(msg) => {
+                let error = format!(
+                    "[✗] Ollama API error\n\n{}\n\nPossible causes:\n  - Incompatible Ollama version\n  - Corrupted model files\n  - Invalid request parameters\n  - Ollama server error\n\nTry these fixes:\n  1. Update Ollama: curl -fsSL https://ollama.ai/install.sh | sh\n  2. Check Ollama version: ollama --version\n  3. Reinstall model: ollama rm <model> && ollama pull <model>\n  4. Check Ollama logs for errors\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
+            Self::NetworkError(msg) => {
+                let error = format!(
+                    "[✗] Network error\n\n{}\n\nPossible causes:\n  - Network connection interrupted\n  - Proxy or VPN interference\n  - DNS resolution failure\n  - Firewall blocking connections\n\nTry these fixes:\n  1. Check internet connection\n  2. Disable VPN temporarily\n  3. Check firewall settings\n  4. Verify DNS: ping localhost\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
+                    msg
+                );
+                write!(f, "{}", error)
+            }
         }
     }
 }
@@ -223,8 +222,26 @@ impl OllamaClient {
     /// Create a new Ollama client with default settings.
     ///
     /// Connects to `http://localhost:11434` by default.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if the HTTP client cannot be built. This should only happen
+    /// if the system's TLS/SSL stack is fundamentally broken. For initialization code,
+    /// this is acceptable behavior. For request handling paths, consider checking
+    /// client availability before making requests.
     pub fn new() -> Self {
-        Self::with_url(DEFAULT_OLLAMA_URL)
+        Self::try_new()
+            .expect("Failed to create Ollama client during initialization. This indicates a critical system configuration issue (TLS/SSL failure).")
+    }
+
+    /// Try to create a new Ollama client with default settings, returning an error if it fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built. This is extremely rare and
+    /// typically indicates a system-level TLS/SSL configuration problem.
+    pub fn try_new() -> Result<Self, OllamaError> {
+        Self::try_with_url(DEFAULT_OLLAMA_URL)
     }
 
     /// Create a new Ollama client with a custom URL.
@@ -232,18 +249,47 @@ impl OllamaClient {
     /// # Arguments
     ///
     /// * `url` - The base URL for the Ollama API (e.g., "http://localhost:11434")
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if the HTTP client cannot be built. For non-initialization code,
+    /// use `try_with_url` instead to handle the error gracefully.
     pub fn with_url(url: impl Into<String>) -> Self {
+        let url_string = url.into();
+        Self::try_with_url(url_string.clone())
+            .unwrap_or_else(|e| {
+                panic!("Failed to create Ollama client with URL '{}': {}", url_string, e)
+            })
+    }
+
+    /// Try to create a new Ollama client with a custom URL.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - The base URL for the Ollama API (e.g., "http://localhost:11434")
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP client cannot be built. This is extremely rare and
+    /// typically indicates a system-level TLS/SSL configuration problem.
+    pub fn try_with_url(url: impl Into<String>) -> Result<Self, OllamaError> {
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECTION_TIMEOUT_SECS))
             .build()
-            .expect("Failed to create HTTP client");
+            .map_err(|e| {
+                tracing::error!("Failed to build HTTP client: {}", crate::audit::redact_secrets(&e.to_string()));
+                OllamaError::NetworkError(format!(
+                    "Cannot build HTTP client: {}. This usually indicates a TLS/SSL configuration issue.",
+                    crate::audit::redact_secrets(&e.to_string())
+                ))
+            })?;
 
-        Self {
+        Ok(Self {
             base_url: url.into().trim_end_matches('/').to_string(),
             client,
             generation_timeout: Duration::from_secs(GENERATION_TIMEOUT_SECS),
             pull_timeout: Duration::from_secs(PULL_TIMEOUT_SECS),
-        }
+        })
     }
 
     /// Set a custom timeout for generation requests.
@@ -323,15 +369,18 @@ impl OllamaClient {
             .map_err(|e| {
                 if e.is_connect() {
                     anyhow!(OllamaError::NotRunning(format!(
-                        "Cannot connect to Ollama at {}. Please ensure Ollama is running with: ollama serve",
+                        "Cannot connect to Ollama at {}.",
                         self.base_url
                     )))
                 } else if e.is_timeout() {
                     anyhow!(OllamaError::Timeout(
-                        "Connection timed out while listing models".to_string()
+                        "Connection timed out while listing models.".to_string()
                     ))
                 } else {
-                    anyhow!(OllamaError::NetworkError(e.to_string()))
+                    anyhow!(OllamaError::NetworkError(format!(
+                        "Failed to connect: {}",
+                        e
+                    )))
                 }
             })?;
 
@@ -364,15 +413,18 @@ impl OllamaClient {
             .map_err(|e| {
                 if e.is_connect() {
                     anyhow!(OllamaError::NotRunning(format!(
-                        "Cannot connect to Ollama at {}",
+                        "Cannot connect to Ollama at {}.",
                         self.base_url
                     )))
                 } else if e.is_timeout() {
                     anyhow!(OllamaError::Timeout(
-                        "Connection timed out while listing models".to_string()
+                        "Connection timed out while listing models.".to_string()
                     ))
                 } else {
-                    anyhow!(OllamaError::NetworkError(e.to_string()))
+                    anyhow!(OllamaError::NetworkError(format!(
+                        "Failed to connect: {}",
+                        e
+                    )))
                 }
             })?;
 
@@ -465,15 +517,18 @@ impl OllamaClient {
             .map_err(|e| {
                 if e.is_connect() {
                     anyhow!(OllamaError::NotRunning(format!(
-                        "Cannot connect to Ollama at {}. Please ensure Ollama is running.",
+                        "Cannot connect to Ollama at {}.",
                         self.base_url
                     )))
                 } else if e.is_timeout() {
                     anyhow!(OllamaError::Timeout(
-                        "Pull operation timed out. The model may be very large.".to_string()
+                        "Pull operation timed out. The model download may be very large.".to_string()
                     ))
                 } else {
-                    anyhow!(OllamaError::NetworkError(e.to_string()))
+                    anyhow!(OllamaError::NetworkError(format!(
+                        "Failed to pull model: {}",
+                        e
+                    )))
                 }
             })?;
 
@@ -573,16 +628,19 @@ impl OllamaClient {
             .map_err(|e| {
                 if e.is_connect() {
                     anyhow!(OllamaError::NotRunning(format!(
-                        "Cannot connect to Ollama at {}. Please ensure Ollama is running with: ollama serve",
+                        "Cannot connect to Ollama at {}.",
                         self.base_url
                     )))
                 } else if e.is_timeout() {
                     anyhow!(OllamaError::Timeout(format!(
-                        "Generation request timed out after {} seconds. Consider using a smaller model or shorter prompt.",
+                        "Generation request timed out after {} seconds.",
                         self.generation_timeout.as_secs()
                     )))
                 } else {
-                    anyhow!(OllamaError::NetworkError(e.to_string()))
+                    anyhow!(OllamaError::NetworkError(format!(
+                        "Failed to generate text: {}",
+                        e
+                    )))
                 }
             })?;
 
@@ -593,10 +651,7 @@ impl OllamaClient {
 
             // Check for model not found
             if status.as_u16() == 404 || error_text.contains("not found") || error_text.contains("model") {
-                return Err(anyhow!(OllamaError::ModelNotFound(format!(
-                    "Model '{}' not found. Pull it first with: ollama pull {}",
-                    model, model
-                ))));
+                return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
             }
 
             return Err(anyhow!(OllamaError::ApiError(format!(
@@ -611,12 +666,12 @@ impl OllamaClient {
 
         if let Some(error) = gen_response.error {
             if error.contains("not found") {
-                return Err(anyhow!(OllamaError::ModelNotFound(format!(
-                    "Model '{}' not found. Pull it first with: ollama pull {}",
-                    model, model
-                ))));
+                return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
             }
-            return Err(anyhow!(OllamaError::ApiError(error)));
+            return Err(anyhow!(OllamaError::ApiError(format!(
+                "Ollama returned an error: {}",
+                error
+            ))));
         }
 
         Ok(OllamaResponse {
@@ -696,16 +751,19 @@ impl OllamaClient {
             .map_err(|e| {
                 if e.is_connect() {
                     anyhow!(OllamaError::NotRunning(format!(
-                        "Cannot connect to Ollama at {}. Please ensure Ollama is running with: ollama serve",
+                        "Cannot connect to Ollama at {}.",
                         self.base_url
                     )))
                 } else if e.is_timeout() {
                     anyhow!(OllamaError::Timeout(format!(
-                        "Chat request timed out after {} seconds. Consider using a smaller model or shorter conversation.",
+                        "Chat request timed out after {} seconds.",
                         self.generation_timeout.as_secs()
                     )))
                 } else {
-                    anyhow!(OllamaError::NetworkError(e.to_string()))
+                    anyhow!(OllamaError::NetworkError(format!(
+                        "Failed to complete chat: {}",
+                        e
+                    )))
                 }
             })?;
 
@@ -715,14 +773,11 @@ impl OllamaClient {
             let error_text = response.text().unwrap_or_default();
 
             if status.as_u16() == 404 || error_text.contains("not found") {
-                return Err(anyhow!(OllamaError::ModelNotFound(format!(
-                    "Model '{}' not found. Pull it first with: ollama pull {}",
-                    model, model
-                ))));
+                return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
             }
 
             return Err(anyhow!(OllamaError::ApiError(format!(
-                "Chat failed: HTTP {} - {}",
+                "Chat failed with HTTP {}: {}",
                 status, error_text
             ))));
         }
@@ -733,12 +788,12 @@ impl OllamaClient {
 
         if let Some(error) = chat_response.error {
             if error.contains("not found") {
-                return Err(anyhow!(OllamaError::ModelNotFound(format!(
-                    "Model '{}' not found. Pull it first with: ollama pull {}",
-                    model, model
-                ))));
+                return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
             }
-            return Err(anyhow!(OllamaError::ApiError(error)));
+            return Err(anyhow!(OllamaError::ApiError(format!(
+                "Ollama returned an error: {}",
+                error
+            ))));
         }
 
         let response_text = chat_response
@@ -863,16 +918,19 @@ impl OllamaClient {
             .map_err(|e| {
                 if e.is_connect() {
                     anyhow!(OllamaError::NotRunning(format!(
-                        "Cannot connect to Ollama at {}. Please ensure Ollama is running with: ollama serve",
+                        "Cannot connect to Ollama at {}.",
                         self.base_url
                     )))
                 } else if e.is_timeout() {
                     anyhow!(OllamaError::Timeout(format!(
-                        "Chat request timed out after {} seconds.",
+                        "Streaming chat request timed out after {} seconds.",
                         self.generation_timeout.as_secs()
                     )))
                 } else {
-                    anyhow!(OllamaError::NetworkError(e.to_string()))
+                    anyhow!(OllamaError::NetworkError(format!(
+                        "Failed to stream chat: {}",
+                        e
+                    )))
                 }
             })?;
 
@@ -882,14 +940,11 @@ impl OllamaClient {
             let error_text = response.text().unwrap_or_default();
 
             if status.as_u16() == 404 || error_text.contains("not found") {
-                return Err(anyhow!(OllamaError::ModelNotFound(format!(
-                    "Model '{}' not found. Pull it first with: ollama pull {}",
-                    model, model
-                ))));
+                return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
             }
 
             return Err(anyhow!(OllamaError::ApiError(format!(
-                "Chat failed: HTTP {} - {}",
+                "Streaming chat failed with HTTP {}: {}",
                 status, error_text
             ))));
         }
@@ -910,12 +965,12 @@ impl OllamaClient {
             if let Ok(chunk) = serde_json::from_str::<ChatResponse>(line) {
                 if let Some(error) = chunk.error {
                     if error.contains("not found") {
-                        return Err(anyhow!(OllamaError::ModelNotFound(format!(
-                            "Model '{}' not found. Pull it first with: ollama pull {}",
-                            model, model
-                        ))));
+                        return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
                     }
-                    return Err(anyhow!(OllamaError::ApiError(error)));
+                    return Err(anyhow!(OllamaError::ApiError(format!(
+                        "Ollama returned an error during streaming: {}",
+                        error
+                    ))));
                 }
 
                 if let Some(msg) = chunk.message {

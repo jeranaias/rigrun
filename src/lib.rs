@@ -17,21 +17,27 @@
 //! - [`cloud`] - Cloud API integration (OpenRouter)
 //! - [`server`] - HTTP server for API compatibility
 //! - [`audit`] - Privacy audit logging for transparency
+//! - [`error`] - Consistent error formatting utilities
 
 pub mod audit;
 pub mod cache;
 pub mod cloud;
 pub mod detect;
+pub mod error;
 pub mod local;
 pub mod router;
 pub mod server;
 pub mod stats;
+pub mod types;
 pub mod utils;
+
+// Re-export commonly used types from types module
+pub use types::Tier;
 
 // Re-export commonly used types from router
 pub use router::{
     classify_query, route_query, route_query_detailed,
-    QueryComplexity, QueryResult, QueryType, RoutingDecision, Tier,
+    QueryComplexity, QueryResult, QueryType, RoutingDecision,
 };
 
 // Re-export cache types
@@ -60,7 +66,8 @@ pub use detect::{
     // CPU fallback diagnosis
     diagnose_cpu_fallback, CpuFallbackCause, CpuFallbackDiagnosis,
 };
-pub use local::{OllamaClient, OllamaResponse, Message};
+pub use local::{OllamaClient, OllamaResponse};
+pub use types::Message;
 pub use stats::{QueryStats, SessionStats, StatsTracker, SavingsSummary};
 pub use cloud::OpenRouterClient;
 pub use server::Server;
@@ -70,5 +77,8 @@ pub use utils::mask_sensitive;
 pub use audit::{
     AuditEntry, AuditLogger, AuditTier,
     audit_log_query, audit_log_blocked, is_audit_enabled, set_audit_enabled,
-    init_audit_logger, global_audit_logger,
+    init_audit_logger, global_audit_logger, redact_secrets,
 };
+
+// Re-export error utilities
+pub use error::{format_error, format_simple_error, ErrorBuilder, GITHUB_ISSUES_URL};
