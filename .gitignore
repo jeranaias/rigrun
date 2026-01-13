@@ -375,3 +375,19 @@ ask_rigrun.ps1
 # ============================================================================
 # END OF .gitignore
 # ============================================================================
+
+# Internal planning docs (not for public repo)
+AUTHENTICATION_IMPLEMENTATION.md
+BATTLE_PLAN.md
+BUSINESS_EVALUATION_REPORT.md
+PHASE_*.md
+PHASE_COMPLETION_REPORT.md
+REDDIT_POST.md
+REMEDIATION_PLAN.md
+marketing/
+agent-prompts/
+SECURITY_TEST_REPORT.md
+docs/CLAUDE_CODE_USAGE.md
+
+# Temp files
+tmpclaude-*
