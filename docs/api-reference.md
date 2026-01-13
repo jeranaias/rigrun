@@ -534,6 +534,6 @@ curl -N -X POST http://localhost:8787/v1/chat/completions \
 ---
 
 For more information:
-- [Configuration Guide](CONFIGURATION.md)
-- [Quick Start Guide](QUICKSTART.md)
+- [Configuration Guide](configuration.md)
+- [Quick Start Guide](getting-started.md)
 - [Main README](../README.md)

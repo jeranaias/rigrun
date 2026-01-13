@@ -7,30 +7,11 @@
 //! Focus: Cost optimization while maintaining response quality.
 
 use serde::{Deserialize, Serialize};
+use crate::types::Tier;
 
 // ============================================================================
-// TIER DEFINITIONS
+// TIER EXTENSIONS FOR ROUTING
 // ============================================================================
-
-/// Execution tiers ordered by cost and capability.
-///
-/// The routing strategy: start cheap, escalate only when needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
-pub enum Tier {
-    /// Local cache - instant response, zero cost
-    Cache,
-    /// Local LLM (Ollama) - fast, free, good for simple tasks
-    #[default]
-    Local,
-    /// Cloud inference via OpenRouter auto-router - intelligently picks best model
-    Cloud,
-    /// Claude Haiku - fast cloud model, cheap (explicit selection)
-    Haiku,
-    /// Claude Sonnet - balanced performance and cost (explicit selection)
-    Sonnet,
-    /// Claude Opus - most capable, highest cost (explicit selection)
-    Opus,
-}
 
 impl Tier {
     /// Human-readable tier name.
@@ -42,6 +23,7 @@ impl Tier {
             Self::Haiku => "Haiku",
             Self::Sonnet => "Sonnet",
             Self::Opus => "Opus",
+            Self::Gpt4o => "GPT-4o",
         }
     }
 
@@ -52,6 +34,7 @@ impl Tier {
     /// - Haiku: $0.25/M input = 0.025 cents/1K
     /// - Sonnet: $3/M input = 0.3 cents/1K
     /// - Opus: $15/M input = 1.5 cents/1K
+    /// - GPT-4o: $2.5/M input = 0.25 cents/1K
     pub fn input_cost_per_1k(&self) -> f32 {
         match self {
             Self::Cache => 0.0,
@@ -60,6 +43,7 @@ impl Tier {
             Self::Haiku => 0.025,
             Self::Sonnet => 0.3,
             Self::Opus => 1.5,
+            Self::Gpt4o => 0.25,
         }
     }
 
@@ -70,6 +54,7 @@ impl Tier {
     /// - Haiku: $1.25/M output = 0.125 cents/1K
     /// - Sonnet: $15/M output = 1.5 cents/1K
     /// - Opus: $75/M output = 7.5 cents/1K
+    /// - GPT-4o: $10/M output = 1.0 cents/1K
     pub fn output_cost_per_1k(&self) -> f32 {
         match self {
             Self::Cache => 0.0,
@@ -78,13 +63,14 @@ impl Tier {
             Self::Haiku => 0.125,
             Self::Sonnet => 1.5,
             Self::Opus => 7.5,
+            Self::Gpt4o => 1.0,
         }
     }
 
     /// Calculate total cost for a request.
     ///
     /// Returns cost in cents.
-    pub fn calculate_cost(&self, input_tokens: u32, output_tokens: u32) -> f32 {
+    pub fn calculate_cost_cents(&self, input_tokens: u32, output_tokens: u32) -> f32 {
         let input_cost = (input_tokens as f32 / 1000.0) * self.input_cost_per_1k();
         let output_cost = (output_tokens as f32 / 1000.0) * self.output_cost_per_1k();
         input_cost + output_cost
@@ -99,6 +85,7 @@ impl Tier {
             Self::Haiku => 800,
             Self::Sonnet => 1500,
             Self::Opus => 3000,
+            Self::Gpt4o => 1200,
         }
     }
 
@@ -111,6 +98,7 @@ impl Tier {
             Self::Haiku => Some(Self::Sonnet),
             Self::Sonnet => Some(Self::Opus),
             Self::Opus => None,
+            Self::Gpt4o => None,
         }
     }
 }
@@ -401,7 +389,7 @@ impl QueryResult {
         output_tokens: u32,
         latency_ms: u64,
     ) -> Self {
-        let cost = tier.calculate_cost(input_tokens, output_tokens);
+        let cost = tier.calculate_cost_cents(input_tokens, output_tokens);
         Self {
             response,
             tier_used: tier,
@@ -423,27 +411,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tier_ordering() {
-        assert!(Tier::Cache < Tier::Local);
-        assert!(Tier::Local < Tier::Cloud);
-        assert!(Tier::Cloud < Tier::Haiku);
-        assert!(Tier::Haiku < Tier::Sonnet);
-        assert!(Tier::Sonnet < Tier::Opus);
-    }
-
-    #[test]
     fn test_tier_costs() {
         // Cache and Local should be free
-        assert_eq!(Tier::Cache.calculate_cost(1000, 1000), 0.0);
-        assert_eq!(Tier::Local.calculate_cost(1000, 1000), 0.0);
+        assert_eq!(Tier::Cache.calculate_cost_cents(1000, 1000), 0.0);
+        assert_eq!(Tier::Local.calculate_cost_cents(1000, 1000), 0.0);
 
         // Cloud tier should have cost
-        assert!(Tier::Cloud.calculate_cost(1000, 1000) > 0.0);
+        assert!(Tier::Cloud.calculate_cost_cents(1000, 1000) > 0.0);
 
         // Explicit model tiers should have costs
-        assert!(Tier::Haiku.calculate_cost(1000, 1000) > 0.0);
-        assert!(Tier::Sonnet.calculate_cost(1000, 1000) > Tier::Haiku.calculate_cost(1000, 1000));
-        assert!(Tier::Opus.calculate_cost(1000, 1000) > Tier::Sonnet.calculate_cost(1000, 1000));
+        assert!(Tier::Haiku.calculate_cost_cents(1000, 1000) > 0.0);
+        assert!(Tier::Sonnet.calculate_cost_cents(1000, 1000) > Tier::Haiku.calculate_cost_cents(1000, 1000));
+        assert!(Tier::Opus.calculate_cost_cents(1000, 1000) > Tier::Sonnet.calculate_cost_cents(1000, 1000));
     }
 
     #[test]

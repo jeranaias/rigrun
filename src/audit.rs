@@ -8,16 +8,43 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Local, Utc};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock, OnceLock};
+use std::sync::{Arc, RwLock, OnceLock, LazyLock};
 
-use crate::router::Tier;
+use crate::types::Tier;
 
 /// Maximum length of query preview in audit log
 const QUERY_PREVIEW_LENGTH: usize = 50;
+
+/// Redaction patterns for sensitive data
+/// JUSTIFICATION for .unwrap(): These are static, compile-time-validated regex patterns.
+/// If any of these fail to compile, it's a programmer error that should be caught in testing.
+/// This initialization happens once at startup, not during request handling.
+static REDACTION_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+    vec![
+        (Regex::new(r"sk-[a-zA-Z0-9]{20,}").expect("OpenAI key regex is valid"), "[REDACTED_API_KEY]"),
+        (Regex::new(r"sk-or-[a-zA-Z0-9-]{20,}").expect("OpenRouter key regex is valid"), "[REDACTED_API_KEY]"),
+        (Regex::new(r"sk-ant-[a-zA-Z0-9-]{20,}").expect("Anthropic key regex is valid"), "[REDACTED_API_KEY]"),
+        (Regex::new(r"AKIA[0-9A-Z]{16}").expect("AWS key regex is valid"), "[REDACTED_AWS_KEY]"),
+        (Regex::new(r"ghp_[a-zA-Z0-9]{36}").expect("GitHub token regex is valid"), "[REDACTED_GITHUB_TOKEN]"),
+        (Regex::new(r"password[=:]\s*\S+").expect("Password regex is valid"), "password=[REDACTED]"),
+        (Regex::new(r"Bearer [a-zA-Z0-9-._~+/]+=*").expect("Bearer token regex is valid"), "Bearer [REDACTED]"),
+        (Regex::new(r"\b[A-Za-z0-9]{32,}\b").expect("Generic key regex is valid"), "[REDACTED_KEY]"),
+    ]
+});
+
+/// Redact secrets from text before logging
+pub fn redact_secrets(text: &str) -> String {
+    let mut result = text.to_string();
+    for (pattern, replacement) in REDACTION_PATTERNS.iter() {
+        result = pattern.replace_all(&result, *replacement).to_string();
+    }
+    result
+}
 
 /// Audit log entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,7 +81,7 @@ impl AuditTier {
         match tier {
             Tier::Cache => Self::CacheHit,
             Tier::Local => Self::Local,
-            Tier::Cloud | Tier::Haiku | Tier::Sonnet | Tier::Opus => Self::Cloud,
+            Tier::Cloud | Tier::Haiku | Tier::Sonnet | Tier::Opus | Tier::Gpt4o => Self::Cloud,
         }
     }
 
@@ -84,7 +111,9 @@ impl AuditEntry {
         cost_usd: f64,
         blocked: bool,
     ) -> Self {
-        let query_preview = truncate_query(query, QUERY_PREVIEW_LENGTH);
+        // Redact secrets before truncating
+        let redacted_query = redact_secrets(query);
+        let query_preview = truncate_query(&redacted_query, QUERY_PREVIEW_LENGTH);
 
         Self {
             timestamp: Utc::now(),
@@ -289,10 +318,13 @@ impl AuditLogger {
 static GLOBAL_AUDIT_LOGGER: OnceLock<Arc<RwLock<AuditLogger>>> = OnceLock::new();
 
 /// Get or initialize the global audit logger
+/// JUSTIFICATION for .expect(): This is global initialization code that runs once at startup.
+/// If creating the audit log directory fails, it indicates severe filesystem issues
+/// (no home directory, no write permissions, disk full, etc.) that should prevent startup.
 pub fn global_audit_logger() -> &'static Arc<RwLock<AuditLogger>> {
     GLOBAL_AUDIT_LOGGER.get_or_init(|| {
         Arc::new(RwLock::new(
-            AuditLogger::new(true).expect("Failed to initialize audit logger")
+            AuditLogger::new(true).expect("Failed to initialize audit logger. Cannot create ~/.rigrun directory. Check filesystem permissions and disk space.")
         ))
     })
 }
@@ -397,5 +429,109 @@ mod tests {
         assert_eq!(AuditTier::Local.as_str(), "LOCAL");
         assert_eq!(AuditTier::Cloud.as_str(), "CLOUD");
         assert_eq!(AuditTier::CloudBlocked.as_str(), "CLOUD_BLOCKED");
+    }
+
+    #[test]
+    fn test_redact_secrets_openai_key() {
+        let text = "Use this key: sk-1234567890abcdefghij1234567890";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "Use this key: [REDACTED_API_KEY]");
+    }
+
+    #[test]
+    fn test_redact_secrets_openrouter_key() {
+        let text = "OpenRouter key: sk-or-v1-1234567890abcdefghij1234567890";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "OpenRouter key: [REDACTED_API_KEY]");
+    }
+
+    #[test]
+    fn test_redact_secrets_anthropic_key() {
+        let text = "Anthropic key: sk-ant-api03-1234567890abcdefghij1234567890";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "Anthropic key: [REDACTED_API_KEY]");
+    }
+
+    #[test]
+    fn test_redact_secrets_bearer_token() {
+        let text = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "Authorization: Bearer [REDACTED]");
+    }
+
+    #[test]
+    fn test_redact_secrets_long_alphanumeric() {
+        let text = "Secret: abcdefghij1234567890abcdefghij1234567890";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "Secret: [REDACTED_KEY]");
+    }
+
+    #[test]
+    fn test_redact_secrets_multiple_patterns() {
+        let text = "OpenAI: sk-1234567890abcdefghij1234 and Bearer token123456789012345678901234567890";
+        let redacted = redact_secrets(text);
+        assert!(redacted.contains("[REDACTED_API_KEY]"));
+        assert!(redacted.contains("Bearer [REDACTED]"));
+    }
+
+    #[test]
+    fn test_redact_secrets_in_audit_entry() {
+        let entry = AuditEntry::new(
+            Tier::Cloud,
+            "Query with key sk-1234567890abcdefghij1234567890",
+            100,
+            200,
+            0.01,
+            false,
+        );
+        assert!(entry.query_preview.contains("[REDACTED_API_KEY]"));
+        assert!(!entry.query_preview.contains("sk-1234567890"));
+    }
+
+    #[test]
+    fn test_redact_secrets_preserves_safe_text() {
+        let text = "What is the capital of France?";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, text);
+    }
+
+    #[test]
+    fn test_redact_secrets_aws_key() {
+        let text = "AWS key: AKIAIOSFODNN7EXAMPLE";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "AWS key: [REDACTED_AWS_KEY]");
+    }
+
+    #[test]
+    fn test_redact_secrets_github_token() {
+        let text = "GitHub token: ghp_1234567890abcdefghijklmnopqrstuvw";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "GitHub token: [REDACTED_GITHUB_TOKEN]");
+    }
+
+    #[test]
+    fn test_redact_secrets_password() {
+        let text = "Connect with password=secretpass123";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "Connect with password=[REDACTED]");
+    }
+
+    #[test]
+    fn test_redact_secrets_password_colon() {
+        let text = "Config password: mypassword123";
+        let redacted = redact_secrets(text);
+        assert_eq!(redacted, "Config password=[REDACTED]");
+    }
+
+    #[test]
+    fn test_redact_secrets_multiple_new_patterns() {
+        let text = "AWS: AKIAIOSFODNN7EXAMPLE, GitHub: ghp_abcdefghijklmnopqrstuvwxyz123456, password=secret123";
+        let redacted = redact_secrets(text);
+        assert!(redacted.contains("[REDACTED_AWS_KEY]"));
+        assert!(redacted.contains("[REDACTED_GITHUB_TOKEN]"));
+        assert!(redacted.contains("password=[REDACTED]"));
+        assert!(!redacted.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(!redacted.contains("ghp_"));
+        assert!(!redacted.contains("secret123"));
     }
 }

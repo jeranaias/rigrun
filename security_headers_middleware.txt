@@ -1,0 +1,285 @@
+===========================================
+SECURITY HEADERS MIDDLEWARE IMPLEMENTATION
+===========================================
+
+This file contains the complete implementation for security headers middleware
+that should be added to C:\rigrun\src\server\mod.rs
+
+===========================================
+STEP 1: Add these imports at the top
+===========================================
+
+Add to the existing use statements:
+
+use tower::{Layer, Service};
+use std::task::{Context, Poll};
+use std::pin::Pin;
+use std::future::Future;
+
+And modify the axum import to include:
+use axum::{
+    extract::{DefaultBodyLimit, State},
+    http::{StatusCode, HeaderValue, Request},   // Add HeaderValue, Request
+    response::{Json, Response},                  // Add Response
+    routing::{get, post},
+    Router,
+};
+
+===========================================
+STEP 2: Add cors_origins field to Server struct
+===========================================
+
+Add this field to the Server struct (around line 94):
+
+    /// CORS allowed origins.
+    cors_origins: Vec<String>,
+
+===========================================
+STEP 3: Initialize cors_origins in Server::new()
+===========================================
+
+Add this line to the Server::new() method (around line 114):
+
+            cors_origins: Vec::new(),
+
+===========================================
+STEP 4: Add with_cors_origins builder method
+===========================================
+
+Add this method after with_paranoid_mode() (around line 147):
+
+    /// Set CORS allowed origins.
+    /// If origins are configured, Access-Control-Allow-Origin header will be added.
+    /// Pass vec!["*".to_string()] to allow all origins.
+    /// Pass vec!["https://example.com".to_string()] for specific origins.
+    pub fn with_cors_origins(mut self, origins: Vec<String>) -> Self {
+        self.cors_origins = origins;
+        self
+    }
+
+===========================================
+STEP 5: Add SecurityHeaders middleware
+===========================================
+
+Add this entire section BEFORE the "Request/Response Types" comment (before line 259):
+
+// =============================================================================
+// Security Headers Middleware
+// =============================================================================
+
+/// Security headers middleware layer.
+#[derive(Clone)]
+pub struct SecurityHeadersLayer {
+    cors_origins: Vec<String>,
+}
+
+impl SecurityHeadersLayer {
+    pub fn new(cors_origins: Vec<String>) -> Self {
+        Self { cors_origins }
+    }
+}
+
+impl<S> Layer<S> for SecurityHeadersLayer {
+    type Service = SecurityHeadersMiddleware<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SecurityHeadersMiddleware {
+            inner,
+            cors_origins: self.cors_origins.clone(),
+        }
+    }
+}
+
+/// Security headers middleware service.
+#[derive(Clone)]
+pub struct SecurityHeadersMiddleware<S> {
+    inner: S,
+    cors_origins: Vec<String>,
+}
+
+impl<S, B> Service<Request<B>> for SecurityHeadersMiddleware<S>
+where
+    S: Service<Request<B>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    B: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let mut inner = self.inner.clone();
+        let cors_origins = self.cors_origins.clone();
+
+        // Extract request origin for CORS validation
+        let request_origin = req.headers()
+            .get("origin")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        Box::pin(async move {
+            let response = inner.call(req).await?;
+
+            let (mut parts, body) = response.into_parts();
+
+            // Add security headers to ALL responses
+            parts.headers.insert(
+                "X-Content-Type-Options",
+                HeaderValue::from_static("nosniff"),
+            );
+            parts.headers.insert(
+                "X-Frame-Options",
+                HeaderValue::from_static("DENY"),
+            );
+            parts.headers.insert(
+                "X-XSS-Protection",
+                HeaderValue::from_static("1; mode=block"),
+            );
+            parts.headers.insert(
+                "Content-Security-Policy",
+                HeaderValue::from_static("default-src 'none'"),
+            );
+            parts.headers.insert(
+                "Cache-Control",
+                HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+            );
+            parts.headers.insert(
+                "Pragma",
+                HeaderValue::from_static("no-cache"),
+            );
+
+            // Add CORS headers if origins are configured
+            // Access-Control-Allow-Origin must be a single origin or "*"
+            if !cors_origins.is_empty() {
+                if let Some(origin) = request_origin {
+                    // Check if the request origin is in the allowed list
+                    if cors_origins.contains(&origin) || cors_origins.contains(&"*".to_string()) {
+                        if let Ok(value) = HeaderValue::from_str(&origin) {
+                            parts.headers.insert(
+                                "Access-Control-Allow-Origin",
+                                value,
+                            );
+                            // Add other CORS headers for cross-origin requests
+                            parts.headers.insert(
+                                "Access-Control-Allow-Methods",
+                                HeaderValue::from_static("GET, POST, OPTIONS"),
+                            );
+                            parts.headers.insert(
+                                "Access-Control-Allow-Headers",
+                                HeaderValue::from_static("Content-Type, Authorization"),
+                            );
+                            parts.headers.insert(
+                                "Access-Control-Max-Age",
+                                HeaderValue::from_static("86400"), // 24 hours
+                            );
+                        }
+                    }
+                } else if cors_origins.contains(&"*".to_string()) {
+                    // If wildcard is configured and no origin header, allow all
+                    parts.headers.insert(
+                        "Access-Control-Allow-Origin",
+                        HeaderValue::from_static("*"),
+                    );
+                    parts.headers.insert(
+                        "Access-Control-Allow-Methods",
+                        HeaderValue::from_static("GET, POST, OPTIONS"),
+                    );
+                    parts.headers.insert(
+                        "Access-Control-Allow-Headers",
+                        HeaderValue::from_static("Content-Type, Authorization"),
+                    );
+                    parts.headers.insert(
+                        "Access-Control-Max-Age",
+                        HeaderValue::from_static("86400"), // 24 hours
+                    );
+                }
+            }
+
+            Ok(Response::from_parts(parts, body))
+        })
+    }
+}
+
+===========================================
+STEP 6: Add middleware to the router
+===========================================
+
+In the build_router() method, add the SecurityHeadersLayer AFTER the GovernorLayer
+but BEFORE .with_state(state). Around line 209, change:
+
+        Router::new()
+            .route("/health", get(health_handler))
+            .route("/v1/models", get(models_handler))
+            .route("/v1/chat/completions", post(completions_handler))
+            .route("/stats", get(stats_handler))
+            .route("/cache/stats", get(cache_stats_handler))
+            .route("/cache/semantic", get(semantic_cache_stats_handler))
+            .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
+            .layer(GovernorLayer {
+                config: governor_conf,
+            })
+            .layer(SecurityHeadersLayer::new(self.cors_origins.clone()))  // ADD THIS LINE
+            .with_state(state)
+
+===========================================
+USAGE EXAMPLE
+===========================================
+
+// Default: same-origin only (no CORS headers added)
+let server = Server::new(8787);
+
+// Allow all origins
+let server = Server::new(8787)
+    .with_cors_origins(vec!["*".to_string()]);
+
+// Allow specific origins
+let server = Server::new(8787)
+    .with_cors_origins(vec![
+        "https://example.com".to_string(),
+        "https://app.example.com".to_string(),
+    ]);
+
+===========================================
+SECURITY HEADERS EXPLANATION
+===========================================
+
+The middleware adds these headers to ALL responses:
+
+1. X-Content-Type-Options: nosniff
+   - Prevents MIME-sniffing attacks
+
+2. X-Frame-Options: DENY
+   - Prevents clickjacking by denying the page from being framed
+
+3. X-XSS-Protection: 1; mode=block
+   - Enables XSS filtering in older browsers
+
+4. Content-Security-Policy: default-src 'none'
+   - Restricts resource loading (strict policy)
+
+5. Cache-Control: no-store, no-cache, must-revalidate
+   - Prevents caching of sensitive API responses
+
+6. Pragma: no-cache
+   - Legacy cache control for HTTP/1.0
+
+===========================================
+CORS SUPPORT
+===========================================
+
+When cors_origins is configured:
+- Validates Origin header against allowed origins
+- Adds Access-Control-Allow-Origin with the specific origin (not space-separated list)
+- Adds Access-Control-Allow-Methods: GET, POST, OPTIONS
+- Adds Access-Control-Allow-Headers: Content-Type, Authorization
+- Adds Access-Control-Max-Age: 86400 (24 hours)
+
+Default behavior (empty cors_origins):
+- No CORS headers added = same-origin only
+
+Wildcard support:
+- Pass vec!["*".to_string()] to allow all origins

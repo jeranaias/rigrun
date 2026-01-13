@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use crate::types::Tier;
 
 // ============================================================================
 // COST CONSTANTS (per 1K tokens, in dollars)
@@ -45,32 +46,12 @@ pub mod costs {
 }
 
 // ============================================================================
-// TIER DEFINITION
+// TIER EXTENSIONS FOR STATS
 // ============================================================================
-
-/// Execution tier for queries
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Tier {
-    /// Local cache hit - instant, free
-    Cache,
-    /// Local LLM (Ollama, etc.) - free!
-    Local,
-    /// Cloud inference via OpenRouter auto-router
-    Cloud,
-    /// Claude Haiku - fast, cheap
-    Haiku,
-    /// Claude Sonnet - balanced
-    Sonnet,
-    /// Claude Opus - most capable, most expensive
-    Opus,
-    /// OpenAI GPT-4o
-    Gpt4o,
-}
 
 impl Tier {
     /// Get the display name for the tier
-    pub fn name(&self) -> &'static str {
+    pub fn name_stats(&self) -> &'static str {
         match self {
             Self::Cache => "Cache",
             Self::Local => "Local",
@@ -96,7 +77,7 @@ impl Tier {
     }
 
     /// Input cost per 1K tokens (USD)
-    pub fn input_cost_per_1k(&self) -> f64 {
+    pub fn input_cost_per_1k_usd(&self) -> f64 {
         match self {
             Self::Cache | Self::Local => costs::LOCAL_INPUT_PER_1K,
             Self::Cloud => costs::CLOUD_INPUT_PER_1K,
@@ -108,7 +89,7 @@ impl Tier {
     }
 
     /// Output cost per 1K tokens (USD)
-    pub fn output_cost_per_1k(&self) -> f64 {
+    pub fn output_cost_per_1k_usd(&self) -> f64 {
         match self {
             Self::Cache | Self::Local => costs::LOCAL_OUTPUT_PER_1K,
             Self::Cloud => costs::CLOUD_OUTPUT_PER_1K,
@@ -120,9 +101,9 @@ impl Tier {
     }
 
     /// Calculate cost for given input and output tokens (USD)
-    pub fn calculate_cost(&self, input_tokens: u32, output_tokens: u32) -> f64 {
-        let input_cost = (input_tokens as f64 / 1000.0) * self.input_cost_per_1k();
-        let output_cost = (output_tokens as f64 / 1000.0) * self.output_cost_per_1k();
+    pub fn calculate_cost_usd(&self, input_tokens: u32, output_tokens: u32) -> f64 {
+        let input_cost = (input_tokens as f64 / 1000.0) * self.input_cost_per_1k_usd();
+        let output_cost = (output_tokens as f64 / 1000.0) * self.output_cost_per_1k_usd();
         input_cost + output_cost
     }
 
@@ -163,8 +144,8 @@ impl QueryStats {
         output_tokens: u32,
         latency_ms: u64,
     ) -> Self {
-        let actual_cost = tier.calculate_cost(input_tokens, output_tokens);
-        let opus_cost = Tier::Opus.calculate_cost(input_tokens, output_tokens);
+        let actual_cost = tier.calculate_cost_usd(input_tokens, output_tokens);
+        let opus_cost = Tier::Opus.calculate_cost_usd(input_tokens, output_tokens);
         let saved_vs_opus = opus_cost - actual_cost;
 
         Self {
@@ -251,7 +232,7 @@ impl SessionStats {
         }
 
         // Update tier stats
-        let tier_name = query.tier.name().to_string();
+        let tier_name = query.tier.name_stats().to_string();
         let tier_stats = self.by_tier.entry(tier_name).or_default();
         tier_stats.queries += 1;
         tier_stats.tokens += query.total_tokens() as u64;
@@ -389,7 +370,7 @@ impl AllTimeStats {
         }
 
         // Update tier stats
-        let tier_name = query.tier.name().to_string();
+        let tier_name = query.tier.name_stats().to_string();
         let tier_stats = self.by_tier.entry(tier_name).or_default();
         tier_stats.queries += 1;
         tier_stats.tokens += query.total_tokens() as u64;
@@ -541,37 +522,60 @@ impl StatsTracker {
     }
 
     /// Record a query
+    ///
+    /// This method ensures atomicity by:
+    /// 1. Acquiring both locks before making any changes
+    /// 2. Updating both session and all-time stats before releasing locks
+    /// 3. Returning an error if either lock cannot be acquired
     pub fn record_query(&self, stats: QueryStats) -> Result<()> {
-        // Update session stats
-        if let Ok(mut session) = self.session.write() {
-            session.record(&stats);
-        }
+        // Acquire both locks in a consistent order to prevent deadlocks
+        // Session lock first, then all-time lock
+        let mut session = self.session.write()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire session lock: {}", e))?;
+        let mut all_time = self.all_time.write()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire all-time lock: {}", e))?;
 
-        // Update all-time stats
-        if let Ok(mut all_time) = self.all_time.write() {
-            all_time.record(&stats);
-        }
+        // Now that we hold both locks, update both atomically
+        session.record(&stats);
+        all_time.record(&stats);
 
+        // Both locks are released together when they go out of scope
         Ok(())
     }
 
     /// Get current session stats
+    ///
+    /// Returns a clone of the current session stats.
+    /// If the lock cannot be acquired, returns default stats to maintain
+    /// backwards compatibility.
     pub fn get_session_stats(&self) -> SessionStats {
         self.session
             .read()
             .map(|s| s.clone())
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to acquire session read lock: {}", e);
+                SessionStats::default()
+            })
     }
 
     /// Get all-time stats
+    ///
+    /// Returns a clone of the all-time stats.
+    /// If the lock cannot be acquired, returns default stats to maintain
+    /// backwards compatibility.
     pub fn get_all_time_stats(&self) -> AllTimeStats {
         self.all_time
             .read()
             .map(|s| s.clone())
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                eprintln!("Warning: Failed to acquire all-time read lock: {}", e);
+                AllTimeStats::default()
+            })
     }
 
     /// Get a savings summary
+    ///
+    /// Atomically reads both session and all-time stats to create a summary.
     pub fn get_savings_summary(&self) -> SavingsSummary {
         let all_time = self.get_all_time_stats();
         let session = self.get_session_stats();
@@ -579,16 +583,25 @@ impl StatsTracker {
     }
 
     /// Persist stats to disk using atomic write (write to temp, then rename)
+    ///
+    /// This method ensures atomicity by:
+    /// 1. Acquiring a read lock on all-time stats
+    /// 2. Serializing to a temporary file
+    /// 3. Atomically renaming the temp file to the final path
+    ///
+    /// Returns an error if the lock cannot be acquired or file operations fail.
     pub fn persist_stats(&self) -> Result<()> {
-        if let Ok(all_time) = self.all_time.read() {
-            let content = serde_json::to_string_pretty(&*all_time)?;
+        let all_time = self.all_time.read()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire all-time read lock for persistence: {}", e))?;
 
-            // Use atomic write pattern: write to temp file, then rename
-            // This prevents data corruption if the process crashes mid-write
-            let temp_path = self.stats_path.with_extension("tmp");
-            fs::write(&temp_path, content)?;
-            fs::rename(&temp_path, &self.stats_path)?;
-        }
+        let content = serde_json::to_string_pretty(&*all_time)?;
+
+        // Use atomic write pattern: write to temp file, then rename
+        // This prevents data corruption if the process crashes mid-write
+        let temp_path = self.stats_path.with_extension("tmp");
+        fs::write(&temp_path, content)?;
+        fs::rename(&temp_path, &self.stats_path)?;
+
         Ok(())
     }
 
@@ -661,7 +674,7 @@ pub fn format_stats(session: &SessionStats, all_time: &AllTimeStats) -> String {
     // Tier breakdown
     output.push_str("\n--- BY TIER ---\n\n");
     for tier in [Tier::Cache, Tier::Local, Tier::Cloud, Tier::Haiku, Tier::Sonnet, Tier::Opus, Tier::Gpt4o] {
-        if let Some(stats) = all_time.by_tier.get(tier.name()) {
+        if let Some(stats) = all_time.by_tier.get(tier.name_stats()) {
             if stats.queries > 0 {
                 output.push_str(&format!(
                     "  {:8} {:>8} queries | {:>10} tokens | ${:>8.4} spent | ${:>8.2} saved | {:>6}ms avg\n",
@@ -765,12 +778,12 @@ fn get_motivation_message(total_saved: f64) -> String {
 
 /// Calculate what a query would cost on Opus
 pub fn calculate_opus_cost(input_tokens: u32, output_tokens: u32) -> f64 {
-    Tier::Opus.calculate_cost(input_tokens, output_tokens)
+    Tier::Opus.calculate_cost_usd(input_tokens, output_tokens)
 }
 
 /// Calculate savings compared to Opus
 pub fn calculate_savings(tier: Tier, input_tokens: u32, output_tokens: u32) -> f64 {
-    let actual = tier.calculate_cost(input_tokens, output_tokens);
+    let actual = tier.calculate_cost_usd(input_tokens, output_tokens);
     let opus = calculate_opus_cost(input_tokens, output_tokens);
     opus - actual
 }
@@ -784,9 +797,12 @@ use std::sync::OnceLock;
 static GLOBAL_TRACKER: OnceLock<StatsTracker> = OnceLock::new();
 
 /// Get or initialize the global stats tracker
+/// JUSTIFICATION for .expect(): This is global initialization code that runs once at startup.
+/// If creating the stats directory fails, it indicates severe filesystem issues
+/// (no home directory, no write permissions, disk full, etc.) that should prevent startup.
 pub fn global_tracker() -> &'static StatsTracker {
     GLOBAL_TRACKER.get_or_init(|| {
-        StatsTracker::new().expect("Failed to initialize stats tracker")
+        StatsTracker::new().expect("Failed to initialize stats tracker. Cannot create ~/.rigrun directory. Check filesystem permissions and disk space.")
     })
 }
 
@@ -826,22 +842,22 @@ mod tests {
     #[test]
     fn test_tier_costs() {
         // Local is free
-        assert_eq!(Tier::Local.calculate_cost(1000, 1000), 0.0);
-        assert_eq!(Tier::Cache.calculate_cost(1000, 1000), 0.0);
+        assert_eq!(Tier::Local.calculate_cost_usd(1000, 1000), 0.0);
+        assert_eq!(Tier::Cache.calculate_cost_usd(1000, 1000), 0.0);
 
         // Haiku costs
-        let haiku_cost = Tier::Haiku.calculate_cost(1000, 1000);
+        let haiku_cost = Tier::Haiku.calculate_cost_usd(1000, 1000);
         assert!((haiku_cost - 0.0015).abs() < 0.0001); // 0.00025 + 0.00125
 
         // Opus costs
-        let opus_cost = Tier::Opus.calculate_cost(1000, 1000);
+        let opus_cost = Tier::Opus.calculate_cost_usd(1000, 1000);
         assert!((opus_cost - 0.09).abs() < 0.0001); // 0.015 + 0.075
     }
 
     #[test]
     fn test_savings_calculation() {
         let savings = calculate_savings(Tier::Local, 1000, 1000);
-        let opus_cost = Tier::Opus.calculate_cost(1000, 1000);
+        let opus_cost = Tier::Opus.calculate_cost_usd(1000, 1000);
         assert!((savings - opus_cost).abs() < 0.0001);
     }
 

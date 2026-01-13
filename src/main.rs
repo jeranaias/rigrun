@@ -53,7 +53,15 @@ fn clear_screen() {
 #[derive(Parser)]
 #[command(name = "rigrun")]
 #[command(version = VERSION)]
-#[command(about = "Local-first LLM router. Your GPU first, cloud when needed.", long_about = None)]
+#[command(about = "Local-first LLM router. Your GPU first, cloud when needed.")]
+#[command(long_about = "RigRun - Local-first LLM router\n\n\
+    Start the server:    rigrun\n\
+    Quick question:      rigrun ask \"What is Rust?\"\n\
+    Interactive chat:    rigrun chat\n\
+    Check status:        rigrun status (or: rigrun s)\n\
+    Configure:           rigrun config show\n\
+    Get help:            rigrun doctor\n\n\
+    Your GPU runs local models first. Cloud fallback only when needed.")]
 #[command(propagate_version = true)]
 struct Cli {
     #[command(subcommand)]
@@ -69,73 +77,191 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Show current stats and server status
-    Status,
-
-    /// Configure settings
-    Config {
-        /// Set OpenRouter API key for cloud fallback
-        #[arg(long, value_name = "KEY")]
-        openrouter_key: Option<String>,
-
-        /// Override default model
-        #[arg(long, value_name = "NAME")]
-        model: Option<String>,
-
-        /// Change server port
-        #[arg(long, value_name = "PORT")]
-        port: Option<u16>,
-
-        /// Show current configuration
-        #[arg(long)]
-        show: bool,
-    },
-
-    /// List available and downloaded models
-    Models,
-
-    /// Download a specific model
-    Pull {
-        /// Model name to download (e.g., qwen2.5-coder:14b)
-        model: String,
-    },
-
-    /// Start interactive chat session
-    Chat {
-        /// Model to use (defaults to configured model)
-        #[arg(short, long)]
-        model: Option<String>,
-    },
-
-    /// Show practical CLI usage examples
-    Examples,
-
-    /// Run server as background process
-    Background,
-
-    /// Stop running background server
-    Stop,
-
-    /// Set up IDE integration with rigrun
-    IdeSetup,
-
-    /// Interactive GPU setup wizard
-    GpuSetup,
-
-    /// Export your data (cache and audit log) for privacy/backup
-    Export {
-        /// Output directory for exported data (defaults to current directory)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
-
     /// Ask a single question (simplest way to use rigrun)
+    ///
+    /// Examples:
+    ///   rigrun ask "What is Rust?"
+    ///   rigrun ask "Explain closures" --model qwen2.5-coder:7b
     Ask {
         /// The question to ask
         question: String,
         /// Model to use (defaults to local)
         #[arg(short, long)]
         model: Option<String>,
+    },
+
+    /// Start interactive chat session
+    ///
+    /// Examples:
+    ///   rigrun chat
+    ///   rigrun chat --model qwen2.5-coder:14b
+    Chat {
+        /// Model to use (defaults to configured model)
+        #[arg(short, long)]
+        model: Option<String>,
+    },
+
+    /// Show current stats and server status
+    ///
+    /// Examples:
+    ///   rigrun status
+    ///   rigrun s
+    #[command(alias = "s")]
+    Status,
+
+    /// Configure settings
+    ///
+    /// Examples:
+    ///   rigrun config show
+    ///   rigrun config set-key sk-or-v1-xxx
+    ///   rigrun config set-model qwen2.5-coder:7b
+    ///   rigrun config set-port 8080
+    Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommands>,
+    },
+
+    /// Setup operations (IDE, GPU)
+    ///
+    /// Examples:
+    ///   rigrun setup ide
+    ///   rigrun setup gpu
+    Setup {
+        #[command(subcommand)]
+        command: SetupCommands,
+    },
+
+    /// Cache operations
+    ///
+    /// Examples:
+    ///   rigrun cache stats
+    ///   rigrun cache clear
+    ///   rigrun cache export
+    Cache {
+        #[command(subcommand)]
+        command: CacheCommands,
+    },
+
+    /// Diagnose system health and configuration
+    ///
+    /// Examples:
+    ///   rigrun doctor
+    Doctor,
+
+    /// List available and downloaded models
+    ///
+    /// Examples:
+    ///   rigrun models
+    #[command(alias = "m")]
+    Models,
+
+    /// Download a specific model
+    ///
+    /// Examples:
+    ///   rigrun pull qwen2.5-coder:7b
+    ///   rigrun pull deepseek-coder-v2:16b
+    Pull {
+        /// Model name to download (e.g., qwen2.5-coder:14b)
+        model: String,
+    },
+
+    // Legacy commands (kept for backward compatibility but hidden)
+    #[command(hide = true)]
+    Examples,
+
+    #[command(hide = true)]
+    Background,
+
+    #[command(hide = true)]
+    Stop,
+
+    #[command(hide = true)]
+    IdeSetup,
+
+    #[command(hide = true)]
+    GpuSetup,
+
+    #[command(hide = true)]
+    Export {
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Show current configuration
+    ///
+    /// Example:
+    ///   rigrun config show
+    Show,
+
+    /// Set OpenRouter API key for cloud fallback
+    ///
+    /// Example:
+    ///   rigrun config set-key sk-or-v1-xxx
+    SetKey {
+        /// OpenRouter API key
+        key: String,
+    },
+
+    /// Override default model
+    ///
+    /// Example:
+    ///   rigrun config set-model qwen2.5-coder:7b
+    SetModel {
+        /// Model name
+        model: String,
+    },
+
+    /// Change server port
+    ///
+    /// Example:
+    ///   rigrun config set-port 8080
+    SetPort {
+        /// Port number
+        port: u16,
+    },
+}
+
+#[derive(Subcommand)]
+enum SetupCommands {
+    /// Set up IDE integration with rigrun
+    ///
+    /// Example:
+    ///   rigrun setup ide
+    Ide,
+
+    /// Interactive GPU setup wizard
+    ///
+    /// Example:
+    ///   rigrun setup gpu
+    Gpu,
+}
+
+#[derive(Subcommand)]
+enum CacheCommands {
+    /// Show cache statistics
+    ///
+    /// Example:
+    ///   rigrun cache stats
+    Stats,
+
+    /// Clear the cache
+    ///
+    /// Example:
+    ///   rigrun cache clear
+    Clear,
+
+    /// Export cache and audit log for backup
+    ///
+    /// Example:
+    ///   rigrun cache export
+    ///   rigrun cache export --output ./backups
+    Export {
+        /// Output directory for exported data (defaults to current directory)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -708,82 +834,65 @@ fn show_status() -> Result<()> {
     Ok(())
 }
 
-fn handle_config(
-    openrouter_key: Option<String>,
-    model: Option<String>,
-    port: Option<u16>,
-    show: bool,
-) -> Result<()> {
+fn handle_config(command: Option<ConfigCommands>) -> Result<()> {
     let mut config = load_config()?;
 
-    if show {
-        println!();
-        println!("{BRIGHT_CYAN}{BOLD}=== RigRun Configuration ==={RESET}");
-        println!();
+    match command {
+        None | Some(ConfigCommands::Show) => {
+            println!();
+            println!("{BRIGHT_CYAN}{BOLD}=== RigRun Configuration ==={RESET}");
+            println!();
 
-        let key_display = config
-            .openrouter_key
-            .as_ref()
-            .map(|k| {
-                if k.len() > 8 {
-                    format!("{}...", &k[..8])
-                } else {
-                    format!("{}...", k)
-                }
-            })
-            .unwrap_or_else(|| format!("{DIM}(not set){RESET}"));
-        println!("  OpenRouter Key: {}", key_display);
+            let key_display = config
+                .openrouter_key
+                .as_ref()
+                .map(|k| {
+                    if k.len() > 8 {
+                        format!("{}...", &k[..8])
+                    } else {
+                        format!("{}...", k)
+                    }
+                })
+                .unwrap_or_else(|| format!("{DIM}(not set){RESET}"));
+            println!("  OpenRouter Key: {}", key_display);
 
-        let model_display = config
-            .model.as_deref()
-            .unwrap_or("(auto)");
-        println!("  Model:          {}", model_display);
+            let model_display = config
+                .model.as_deref()
+                .unwrap_or("(auto)");
+            println!("  Model:          {}", model_display);
 
-        println!("  Port:           {}", config.port.unwrap_or(DEFAULT_PORT));
-        println!();
+            println!("  Port:           {}", config.port.unwrap_or(DEFAULT_PORT));
+            println!();
 
-        if let Ok(config_dir) = get_config_dir() {
-            println!(
-                "Config file: {}",
-                config_dir.join("config.json").display()
-            );
+            if let Ok(config_dir) = get_config_dir() {
+                println!(
+                    "Config file: {}",
+                    config_dir.join("config.json").display()
+                );
+            }
+            println!();
         }
-        println!();
-        return Ok(());
-    }
-
-    let mut updated = false;
-
-    if let Some(key) = openrouter_key {
-        config.openrouter_key = Some(key);
-        println!("{GREEN}[✓]{RESET} OpenRouter API key set");
-        updated = true;
-    }
-
-    if let Some(m) = model {
-        println!("{GREEN}[✓]{RESET} Model set to: {}", m);
-        config.model = Some(m);
-        updated = true;
-    }
-
-    if let Some(p) = port {
-        config.port = Some(p);
-        println!("{GREEN}[✓]{RESET} Port set to: {}", p);
-        updated = true;
-    }
-
-    if updated {
-        save_config(&config)?;
-        println!();
-        println!("{GREEN}Configuration saved!{RESET}");
-    } else {
-        println!("No changes. Use --show to view current config or provide options to set.");
-        println!();
-        println!("Examples:");
-        println!("  rigrun config --openrouter-key sk-or-xxx");
-        println!("  rigrun config --model qwen2.5-coder:7b");
-        println!("  rigrun config --port 8080");
-        println!("  rigrun config --show");
+        Some(ConfigCommands::SetKey { key }) => {
+            if !validate_openrouter_key(&key) {
+                return Ok(());
+            }
+            config.openrouter_key = Some(key);
+            save_config(&config)?;
+            println!("{GREEN}[✓]{RESET} OpenRouter API key set");
+            println!();
+        }
+        Some(ConfigCommands::SetModel { model }) => {
+            config.model = Some(model.clone());
+            save_config(&config)?;
+            println!("{GREEN}[✓]{RESET} Model set to: {}", model);
+            println!();
+        }
+        Some(ConfigCommands::SetPort { port }) => {
+            config.port = Some(port);
+            save_config(&config)?;
+            println!("{GREEN}[✓]{RESET} Port set to: {}", port);
+            println!();
+        }
     }
 
     Ok(())
@@ -1831,6 +1940,62 @@ async fn handle_ask(question: &str, model: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Handle cache commands
+fn handle_cache(command: CacheCommands) -> Result<()> {
+    match command {
+        CacheCommands::Stats => {
+            println!();
+            println!("{BRIGHT_CYAN}{BOLD}=== Cache Statistics ==={RESET}");
+            println!();
+
+            let cache_dir = dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rigrun")
+                .join("cache");
+            let cache_file = cache_dir.join("query_cache.json");
+
+            if cache_file.exists() {
+                let cache_content = fs::read_to_string(&cache_file)?;
+                let entry_count = cache_content.matches("query_hash").count();
+                let file_size = cache_content.len();
+
+                println!("  Cache entries:  {WHITE}{BOLD}{}{RESET}", entry_count);
+                println!("  Cache size:     {WHITE}{}{RESET} bytes ({:.2} KB)", file_size, file_size as f64 / 1024.0);
+                println!("  Cache location: {DIM}{}{RESET}", cache_file.display());
+            } else {
+                println!("  {DIM}No cache data found{RESET}");
+            }
+
+            println!();
+        }
+        CacheCommands::Clear => {
+            println!();
+            println!("{BRIGHT_CYAN}{BOLD}=== Clear Cache ==={RESET}");
+            println!();
+
+            let cache_dir = dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("rigrun")
+                .join("cache");
+            let cache_file = cache_dir.join("query_cache.json");
+
+            if cache_file.exists() {
+                fs::remove_file(&cache_file)?;
+                println!("{GREEN}[✓]{RESET} Cache cleared successfully");
+            } else {
+                println!("{YELLOW}[!]{RESET} No cache to clear");
+            }
+
+            println!();
+        }
+        CacheCommands::Export { output } => {
+            handle_export(output)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Handle the export command - export cached data and audit log
 fn handle_export(output_dir: Option<PathBuf>) -> Result<()> {
     println!();
@@ -1949,6 +2114,127 @@ fn print_paranoid_banner() {
     println!();
 }
 
+/// Run diagnostic checks on the system.
+async fn run_doctor() -> anyhow::Result<()> {
+    use colored::Colorize;
+
+    println!("{}", "rigrun doctor".bold());
+    println!("{}", "=".repeat(40));
+    println!();
+
+    let mut all_passed = true;
+
+    // Check 1: Ollama installation
+    print!("Checking Ollama... ");
+    match check_ollama_installed() {
+        Ok(version) => println!("{} ({})", "[OK]".green(), version),
+        Err(e) => {
+            println!("{} {}", "[FAIL]".red(), e);
+            all_passed = false;
+        }
+    }
+
+    // Check 2: Ollama service
+    print!("Checking Ollama service... ");
+    match check_ollama_running().await {
+        Ok(_) => println!("{}", "[OK]".green()),
+        Err(e) => {
+            println!("{} {}", "[FAIL]".red(), e);
+            all_passed = false;
+        }
+    }
+
+    // Check 3: GPU status
+    print!("Checking GPU... ");
+    match detect_gpu() {
+        Ok(gpu_info) => {
+            if gpu_info.gpu_type == GpuType::Cpu {
+                println!("{} CPU mode - no GPU detected", "[WARN]".yellow());
+                println!("                       Run 'rigrun setup gpu' for help");
+            } else {
+                let vram_info = if gpu_info.vram_gb > 0 {
+                    format!(" ({}GB VRAM)", gpu_info.vram_gb)
+                } else {
+                    String::new()
+                };
+                println!("{} {}{}", "[OK]".green(), gpu_info.name, vram_info);
+            }
+        }
+        Err(e) => {
+            println!("{} {}", "[WARN]".yellow(), e);
+            println!("                       Run 'rigrun setup gpu' for help");
+        }
+    }
+
+    // Check 4: Config validity
+    print!("Checking config... ");
+    match check_config() {
+        Ok(_) => println!("{}", "[OK]".green()),
+        Err(e) => {
+            println!("{} {}", "[WARN]".yellow(), e);
+        }
+    }
+
+    // Check 5: Port availability
+    print!("Checking port 8787... ");
+    match check_port_available(8787) {
+        Ok(_) => println!("{}", "[OK]".green()),
+        Err(e) => {
+            println!("{} {}", "[WARN]".yellow(), e);
+        }
+    }
+
+    println!();
+    if all_passed {
+        println!("{}", "All checks passed! rigrun is ready.".green().bold());
+    } else {
+        println!("{}", "Some checks failed. See above for details.".yellow().bold());
+    }
+
+    Ok(())
+}
+
+fn check_ollama_installed() -> anyhow::Result<String> {
+    let output = std::process::Command::new("ollama")
+        .arg("--version")
+        .output()
+        .map_err(|_| anyhow::anyhow!("Ollama not found. Install from https://ollama.ai"))?;
+
+    let version = String::from_utf8_lossy(&output.stdout);
+    Ok(version.trim().to_string())
+}
+
+async fn check_ollama_running() -> anyhow::Result<()> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()?;
+
+    client.get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .map_err(|_| anyhow::anyhow!("Ollama not running. Start with: ollama serve"))?;
+
+    Ok(())
+}
+
+fn check_config() -> anyhow::Result<()> {
+    let config_dir = dirs::config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Cannot find config directory"))?
+        .join("rigrun");
+
+    if !config_dir.exists() {
+        return Err(anyhow::anyhow!("Config not initialized. Run: rigrun"));
+    }
+    Ok(())
+}
+
+fn check_port_available(port: u16) -> anyhow::Result<()> {
+    use std::net::TcpListener;
+    TcpListener::bind(format!("127.0.0.1:{}", port))
+        .map_err(|_| anyhow::anyhow!("Port {} in use", port))?;
+    Ok(())
+}
+
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1997,7 +2283,7 @@ async fn main() -> Result<()> {
             if !config.first_run_complete {
                 // FIRST RUN: Show wizard ONLY, start server AFTER wizard completes
                 clear_screen();
-                if let Err(e) = firstrun::show_first_run_menu(&mut config) {
+                if let Err(e) = firstrun::show_first_run_menu(&mut config).await {
                     eprintln!("{YELLOW}[!]{RESET} Setup error: {}", e);
                 }
 
@@ -2018,25 +2304,11 @@ async fn main() -> Result<()> {
                 start_server(&config).await?;
             }
         }
-        Some(Commands::Status) => {
+        Some(Commands::Ask { question, model }) => {
             if paranoid_mode {
                 print_paranoid_banner();
             }
-            show_status()?;
-        }
-        Some(Commands::Config {
-            openrouter_key,
-            model,
-            port,
-            show,
-        }) => {
-            handle_config(openrouter_key, model, port, show)?;
-        }
-        Some(Commands::Models) => {
-            list_models()?;
-        }
-        Some(Commands::Pull { model }) => {
-            pull_model(model).await?;
+            handle_ask(&question, model.as_deref()).await?;
         }
         Some(Commands::Chat { model }) => {
             if paranoid_mode {
@@ -2044,6 +2316,38 @@ async fn main() -> Result<()> {
             }
             interactive_chat(model)?;
         }
+        Some(Commands::Status) => {
+            if paranoid_mode {
+                print_paranoid_banner();
+            }
+            show_status()?;
+        }
+        Some(Commands::Config { command }) => {
+            handle_config(command)?;
+        }
+        Some(Commands::Setup { command }) => {
+            match command {
+                SetupCommands::Ide => {
+                    handle_ide_setup().await?;
+                }
+                SetupCommands::Gpu => {
+                    handle_gpu_setup()?;
+                }
+            }
+        }
+        Some(Commands::Cache { command }) => {
+            handle_cache(command)?;
+        }
+        Some(Commands::Doctor) => {
+            run_doctor().await?;
+        }
+        Some(Commands::Models) => {
+            list_models()?;
+        }
+        Some(Commands::Pull { model }) => {
+            pull_model(model).await?;
+        }
+        // Legacy commands (hidden but still functional for backward compatibility)
         Some(Commands::Examples) => {
             handle_cli_examples()?;
         }
@@ -2061,9 +2365,6 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Export { output }) => {
             handle_export(output)?;
-        }
-        Some(Commands::Ask { question, model }) => {
-            handle_ask(&question, model.as_deref()).await?;
         }
     }
 

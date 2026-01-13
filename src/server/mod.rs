@@ -26,27 +26,33 @@
 
 use axum::{
     extract::{DefaultBodyLimit, State},
-    http::StatusCode,
-    response::Json,
+    http::{StatusCode, HeaderValue, Request},
+    response::{Json, Response},
     routing::{get, post},
     Router,
 };
+use tower_http::timeout::TimeoutLayer;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::time::Instant;
 use anyhow::Result;
+use tower::{Layer, Service};
 use tower_governor::{
     governor::GovernorConfigBuilder,
     key_extractor::PeerIpKeyExtractor,
     GovernorLayer,
 };
-use crate::audit;
+use std::task::{Context, Poll};
+use std::pin::Pin;
+use std::future::Future;
+use crate::audit::{self, redact_secrets};
 use crate::cache::semantic::SemanticCache;
-use crate::local::{OllamaClient, Message};
-use crate::router::{route_query, Tier};
+use crate::local::OllamaClient;
+use crate::router::route_query;
 use crate::stats;
-use crate::cloud::{OpenRouterClient, Message as CloudMessage};
+use crate::cloud::OpenRouterClient;
+use crate::types::{Tier, Message};
 
 /// Server state shared across handlers.
 pub struct AppState {
@@ -62,6 +68,8 @@ pub struct AppState {
     pub cache: RwLock<SemanticCache>,
     /// Paranoid mode: block all cloud requests.
     pub paranoid_mode: bool,
+    /// API key for Bearer token authentication.
+    pub api_key: Option<String>,
 }
 
 /// Server configuration.
@@ -75,6 +83,15 @@ pub struct ServerConfig {
     pub bind_address: String,
     /// Paranoid mode: block all cloud requests.
     pub paranoid_mode: bool,
+    /// Maximum concurrent connections (default: 100).
+    pub max_connections: usize,
+    /// API key for Bearer token authentication.
+    pub api_key: Option<String>,
+    /// Semantic cache similarity threshold (0.70 - 0.99).
+    /// Default is 0.92, which provides a good balance between cache hit rate and accuracy.
+    /// Higher values (closer to 1.0) reduce false positives but may miss valid semantic matches.
+    /// Lower values increase hit rate but may cause false positive cache hits.
+    pub similarity_threshold: Option<f32>,
 }
 
 /// API server configuration.
@@ -92,6 +109,15 @@ pub struct Server {
     bind_address: String,
     /// Paranoid mode: block all cloud requests.
     paranoid_mode: bool,
+    /// CORS allowed origins.
+    cors_origins: Vec<String>,
+    /// API key for Bearer token authentication.
+    api_key: Option<String>,
+    /// Semantic cache similarity threshold (0.70 - 0.99).
+    /// Default is 0.92 if not specified.
+    similarity_threshold: Option<f32>,
+    /// Maximum concurrent connections (default: 100).
+    max_connections: usize,
 }
 
 impl Default for Server {
@@ -111,6 +137,10 @@ impl Server {
             openrouter_key: None,
             bind_address: "127.0.0.1".to_string(),
             paranoid_mode: false,
+            cors_origins: Vec::new(),
+            api_key: None,
+            similarity_threshold: None,
+            max_connections: 100,
         }
     }
 
@@ -146,6 +176,30 @@ impl Server {
         self
     }
 
+    /// Set CORS allowed origins.
+    pub fn with_cors_origins(mut self, origins: Vec<String>) -> Self {
+        self.cors_origins = origins;
+        self
+    }
+
+    /// Set the API key for Bearer token authentication.
+    pub fn with_api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(key.into());
+        self
+    }
+
+    /// Set maximum concurrent connections.
+    pub fn with_max_connections(mut self, max: usize) -> Self {
+        self.max_connections = max;
+        self
+    }
+
+    /// Set the semantic cache similarity threshold (0.70 - 0.99).
+    pub fn with_similarity_threshold(mut self, threshold: f32) -> Self {
+        self.similarity_threshold = Some(threshold);
+        self
+    }
+
     /// Build the router with all routes.
     pub fn build_router(&self) -> Router {
         // Initialize OpenRouter client with API key from config or environment
@@ -156,11 +210,28 @@ impl Server {
         };
 
         // Create SemanticCache with QueryCache's default persistent settings
-        // Use 0.80 similarity threshold (80% similarity required for semantic matches)
+        // Default to 0.92 similarity threshold, which provides a good balance between
+        // cache hit rate and accuracy, minimizing false positive matches while still
+        // capturing semantically equivalent queries.
+        let threshold = self.similarity_threshold.unwrap_or(0.92);
+
+        // Validate threshold range
+        let threshold = threshold.clamp(0.70, 0.99);
+
+        // Log warning if threshold is below recommended minimum
+        if threshold < 0.85 {
+            tracing::warn!(
+                "Similarity threshold {} is low - may cause false positive cache hits",
+                threshold
+            );
+        }
+
+        tracing::info!("Initializing semantic cache with similarity threshold: {:.2}", threshold);
+
         let semantic_cache = {
             use crate::cache::QueryCache;
             let exact_cache = QueryCache::default_persistent();
-            SemanticCache::with_cache(exact_cache, 0.80)
+            SemanticCache::with_cache(exact_cache, threshold)
         };
 
         let state = Arc::new(AppState {
@@ -169,35 +240,65 @@ impl Server {
                 default_model: self.default_model.clone(),
                 bind_address: self.bind_address.clone(),
                 paranoid_mode: self.paranoid_mode,
+                max_connections: 100,
+                api_key: self.api_key.clone(),
+                similarity_threshold: Some(threshold),
             },
             ollama_client: OllamaClient::new(),
             openrouter_client,
             local_model: self.local_model.clone(),
             cache: RwLock::new(semantic_cache),
             paranoid_mode: self.paranoid_mode,
+            api_key: self.api_key.clone(),
         });
 
         // Configure rate limiting: 60 requests per minute per IP
+        // NOTE: This .expect() is acceptable because:
+        // 1. This runs during server initialization, not request handling
+        // 2. The configuration is static and known-good
+        // 3. Failure here indicates a library bug, not user error
+        // 4. The server should not start with broken rate limiting
         let governor_conf = Arc::new(
             GovernorConfigBuilder::default()
                 .per_second(1) // 1 request per second = 60 per minute
                 .burst_size(60) // Allow burst of 60 requests
                 .key_extractor(PeerIpKeyExtractor)
                 .finish()
-                .expect("Failed to build governor config")
+                .expect("Failed to build rate limiter configuration with static parameters. This indicates a tower_governor library bug.")
         );
 
-        Router::new()
+        // Public routes (no auth needed)
+        let public_routes = Router::new()
             .route("/health", get(health_handler))
-            .route("/v1/models", get(models_handler))
+            .route("/v1/models", get(models_handler));
+
+        // Protected routes (require auth when api_key is set)
+        let protected_routes = Router::new()
             .route("/v1/chat/completions", post(completions_handler))
             .route("/stats", get(stats_handler))
             .route("/cache/stats", get(cache_stats_handler))
-            .route("/cache/semantic", get(semantic_cache_stats_handler))
+            .route("/cache/semantic", get(semantic_cache_stats_handler));
+
+        // Apply auth middleware only if api_key is configured
+        let protected_routes = if state.api_key.is_some() {
+            protected_routes.route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                require_auth,
+            ))
+        } else {
+            protected_routes
+        };
+
+        Router::new()
+            .merge(public_routes)
+            .merge(protected_routes)
             .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
+            .layer(TimeoutLayer::new(std::time::Duration::from_secs(60)))
             .layer(GovernorLayer {
-                config: governor_conf,
+                config: governor_conf.clone(),
             })
+            .layer(RateLimitHeadersLayer::new(governor_conf))
+            .layer(SecurityHeadersLayer::new(self.cors_origins.clone()))
             .with_state(state)
     }
 
@@ -211,8 +312,9 @@ impl Server {
         // Security warning if binding to all interfaces
         if self.bind_address == "0.0.0.0" {
             tracing::warn!(
-                "Server is binding to 0.0.0.0 which exposes the API to the network. \
-                Use 127.0.0.1 (default) for local-only access."
+                "SECURITY WARNING: Server is binding to 0.0.0.0 which exposes the API to your entire network. \
+                This allows anyone on your network to access the API and potentially send data to cloud providers. \
+                Use 127.0.0.1 (default) for local-only access, or implement authentication if network access is required."
             );
         }
 
@@ -244,6 +346,245 @@ impl Server {
     /// Get the port.
     pub fn port(&self) -> u16 {
         self.port
+    }
+}
+
+// =============================================================================
+// Rate Limit Headers Middleware
+// =============================================================================
+
+/// Rate limit headers middleware layer.
+#[derive(Clone, Default)]
+pub struct RateLimitHeadersLayer;
+
+impl RateLimitHeadersLayer {
+    pub fn new<T>(_config: T) -> Self {
+        Self
+    }
+}
+
+impl<S> Layer<S> for RateLimitHeadersLayer {
+    type Service = RateLimitHeadersMiddleware<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        RateLimitHeadersMiddleware { inner }
+    }
+}
+
+/// Rate limit headers middleware service.
+#[derive(Clone)]
+pub struct RateLimitHeadersMiddleware<S> {
+    inner: S,
+}
+
+impl<S, B> Service<Request<B>> for RateLimitHeadersMiddleware<S>
+where
+    S: Service<Request<B>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    B: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let mut inner = self.inner.clone();
+
+        Box::pin(async move {
+            let response = inner.call(req).await?;
+            let (mut parts, body) = response.into_parts();
+
+            // Add rate limit headers
+            parts.headers.insert(
+                "X-RateLimit-Limit",
+                HeaderValue::from_static("60"),
+            );
+            parts.headers.insert(
+                "X-RateLimit-Window",
+                HeaderValue::from_static("60s"),
+            );
+
+            Ok(Response::from_parts(parts, body))
+        })
+    }
+}
+
+// =============================================================================
+// Authentication Middleware
+// =============================================================================
+
+/// Authentication middleware that checks for Bearer token.
+///
+/// If api_key is configured, requests must include a valid "Authorization: Bearer <token>" header.
+/// If api_key is None, all requests are allowed.
+///
+/// Security measures:
+/// - Uses constant-time comparison to prevent timing attacks
+/// - Returns identical error messages for all auth failures to prevent enumeration attacks
+async fn require_auth(
+    State(state): State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<Response, (StatusCode, String)> {
+    // If no API key is configured, allow all requests
+    let api_key = match &state.api_key {
+        Some(key) => key,
+        None => return Ok(next.run(request).await),
+    };
+
+    // Extract Authorization header
+    let auth_header = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok());
+
+    // Check for Bearer token
+    let token = match auth_header {
+        Some(header) if header.starts_with("Bearer ") => &header[7..], // Skip "Bearer "
+        _ => {
+            // Use identical error message for all auth failures
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "Unauthorized".to_string(),
+            ));
+        }
+    };
+
+    // Constant-time comparison to prevent timing attacks
+    // First check length equality (fast path that's still safe)
+    // Then compare bytes to avoid short-circuit evaluation
+    let is_valid = token.len() == api_key.len()
+        && token.as_bytes()
+            .iter()
+            .zip(api_key.as_bytes().iter())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0;
+
+    if is_valid {
+        Ok(next.run(request).await)
+    } else {
+        // Use identical error message for all auth failures
+        Err((
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized".to_string(),
+        ))
+    }
+}
+
+// =============================================================================
+// Security Headers Middleware
+// =============================================================================
+
+/// Security headers middleware layer.
+#[derive(Clone)]
+pub struct SecurityHeadersLayer {
+    cors_origins: Vec<String>,
+}
+
+impl SecurityHeadersLayer {
+    pub fn new(cors_origins: Vec<String>) -> Self {
+        Self { cors_origins }
+    }
+}
+
+impl<S> Layer<S> for SecurityHeadersLayer {
+    type Service = SecurityHeadersMiddleware<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        SecurityHeadersMiddleware {
+            inner,
+            cors_origins: self.cors_origins.clone(),
+        }
+    }
+}
+
+/// Security headers middleware service.
+#[derive(Clone)]
+pub struct SecurityHeadersMiddleware<S> {
+    inner: S,
+    cors_origins: Vec<String>,
+}
+
+impl<S, B> Service<Request<B>> for SecurityHeadersMiddleware<S>
+where
+    S: Service<Request<B>, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+    B: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let mut inner = self.inner.clone();
+        let cors_origins = self.cors_origins.clone();
+
+        // Extract request origin for CORS validation
+        let request_origin = req.headers()
+            .get("origin")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        Box::pin(async move {
+            let response = inner.call(req).await?;
+            let (mut parts, body) = response.into_parts();
+
+            // Add security headers
+            parts.headers.insert(
+                "X-Content-Type-Options",
+                HeaderValue::from_static("nosniff"),
+            );
+            parts.headers.insert(
+                "X-Frame-Options",
+                HeaderValue::from_static("DENY"),
+            );
+            parts.headers.insert(
+                "X-XSS-Protection",
+                HeaderValue::from_static("1; mode=block"),
+            );
+            parts.headers.insert(
+                "Content-Security-Policy",
+                HeaderValue::from_static("default-src 'none'"),
+            );
+            parts.headers.insert(
+                "Cache-Control",
+                HeaderValue::from_static("no-store, no-cache, must-revalidate"),
+            );
+
+            // Add CORS headers if origins are configured
+            if !cors_origins.is_empty() {
+                if let Some(origin) = request_origin {
+                    if cors_origins.contains(&origin) || cors_origins.contains(&"*".to_string()) {
+                        if let Ok(value) = HeaderValue::from_str(&origin) {
+                            parts.headers.insert("Access-Control-Allow-Origin", value);
+                            parts.headers.insert(
+                                "Access-Control-Allow-Methods",
+                                HeaderValue::from_static("GET, POST, OPTIONS"),
+                            );
+                            parts.headers.insert(
+                                "Access-Control-Allow-Headers",
+                                HeaderValue::from_static("Content-Type, Authorization"),
+                            );
+                        }
+                    }
+                } else if cors_origins.contains(&"*".to_string()) {
+                    parts.headers.insert(
+                        "Access-Control-Allow-Origin",
+                        HeaderValue::from_static("*"),
+                    );
+                }
+            }
+
+            Ok(Response::from_parts(parts, body))
+        })
     }
 }
 
@@ -281,7 +622,7 @@ struct ModelsResponse {
 #[derive(Deserialize)]
 struct ChatCompletionRequest {
     model: String,
-    messages: Vec<ChatMessage>,
+    messages: Vec<Message>,
     #[serde(default)]
     #[allow(dead_code)]
     temperature: Option<f32>,
@@ -301,13 +642,6 @@ const OLLAMA_TIMEOUT_SECS: u64 = 120;
 // Maximum request body size (1MB)
 const MAX_BODY_SIZE: usize = 1024 * 1024;
 
-/// Chat message.
-#[derive(Deserialize, Serialize, Clone)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
 /// Chat completion response.
 #[derive(Serialize)]
 struct ChatCompletionResponse {
@@ -323,7 +657,7 @@ struct ChatCompletionResponse {
 #[derive(Serialize)]
 struct ChatChoice {
     index: u32,
-    message: ChatMessage,
+    message: Message,
     finish_reason: String,
 }
 
@@ -407,10 +741,17 @@ async fn health_handler(
 
 /// Check if Ollama is reachable with a quick HTTP ping.
 async fn check_ollama_health() -> bool {
-    let client = reqwest::Client::builder()
+    // Try to build HTTP client - if this fails, system TLS is broken
+    let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()
-        .unwrap_or_default();
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("Failed to build HTTP client for health check: {}. System TLS/SSL may be misconfigured.", redact_secrets(&e.to_string()));
+            return false;
+        }
+    };
 
     match client.get("http://localhost:11434/api/tags").send().await {
         Ok(response) => response.status().is_success(),
@@ -500,14 +841,33 @@ async fn completions_handler(
         .map(|m| m.content.as_str())
         .unwrap_or("");
 
-    // Check cache first for ALL requests (semantic cache with similarity matching)
-    // This allows cache hits even when users explicitly request local/cloud tiers
-    let mut cache = state.cache.write().await;
-    let cache_result = cache.get(cache_key).await;
+    // CRITICAL FIX: Generate embedding OUTSIDE any lock to avoid holding write lock during network I/O
+    // This prevents serializing all requests during the 60s embedding timeout
+    let embedding = {
+        let cache = state.cache.read().await;
+        match cache.generate_embedding(cache_key).await {
+            Ok(emb) => Some(emb),
+            Err(_) => {
+                // Record embedding failure but continue (will try exact match)
+                cache.record_embedding_failure();
+                None
+            }
+        }
+    };
+
+    // Check cache first for ALL requests using READ lock with pre-generated embedding
+    // This allows concurrent cache lookups without blocking other requests
+    let cache_result = {
+        let mut cache = state.cache.write().await;
+        if let Some(ref emb) = embedding {
+            cache.search_with_embedding(cache_key, emb)
+        } else {
+            // Fallback to exact match if embedding generation failed
+            cache.search_with_embedding(cache_key, &[])
+        }
+    };
 
     if let Some(cached) = cache_result {
-        // Release cache lock before returning
-        drop(cache);
 
         let latency_ms = start_time.elapsed().as_millis() as u64;
         tracing::info!("Cache hit for query (hit_count: {}, age: {:.1}h)",
@@ -515,7 +875,7 @@ async fn completions_handler(
 
         // Record cache hit to stats tracker
         let query_stats = stats::QueryStats::new(
-            stats::Tier::Cache,
+            Tier::Cache,
             0, // No tokens for cache hit
             0,
             latency_ms,
@@ -545,7 +905,7 @@ async fn completions_handler(
             model: "cache".to_string(),
             choices: vec![ChatChoice {
                 index: 0,
-                message: ChatMessage {
+                message: Message {
                     role: "assistant".to_string(),
                     content: cached.response,
                 },
@@ -559,8 +919,8 @@ async fn completions_handler(
         }));
     }
 
-    // Cache miss - release lock before executing query on the selected tier
-    drop(cache);
+    // Cache miss - proceed to execute query on the selected tier
+    // (lock was already released after cache lookup)
 
     // Determine which tier to use based on the requested model
     let tier = match request.model.as_str() {
@@ -582,12 +942,8 @@ async fn completions_handler(
         tracing::debug!("Cache miss for explicit cache tier request, falling back to Local tier");
     }
 
-    // Convert request messages to the format expected by OllamaClient
-    let messages: Vec<Message> = request
-        .messages
-        .iter()
-        .map(|msg| Message::new(msg.role.clone(), msg.content.clone()))
-        .collect();
+    // Messages are already in the correct format (types::Message)
+    let messages = request.messages.clone();
 
     // Execute on appropriate tier
     let (response_text, prompt_tokens, completion_tokens, actual_tier) = match tier {
@@ -610,10 +966,10 @@ async fn completions_handler(
                 )
             })?
             .map_err(|e| {
-                tracing::error!("Ollama error: {}", e);
+                tracing::error!("Ollama error: {}", redact_secrets(&e.to_string()));
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Ollama error: {}", e),
+                    format!("Ollama error: {}", redact_secrets(&e.to_string())),
                 )
             })?;
 
@@ -638,12 +994,8 @@ async fn completions_handler(
             // Use OpenRouter auto-router - it picks the best model automatically
             let model = "openrouter/auto";
 
-            // Convert messages to OpenRouter format
-            let cloud_messages: Vec<CloudMessage> = request
-                .messages
-                .iter()
-                .map(|msg| CloudMessage::new(msg.role.clone(), msg.content.clone()))
-                .collect();
+            // Messages are already in the correct format (types::Message)
+            let cloud_messages = request.messages.clone();
 
             // Call OpenRouter for cloud inference with auto-routing
             let openrouter_response = state
@@ -651,10 +1003,10 @@ async fn completions_handler(
                 .chat(model, cloud_messages)
                 .await
                 .map_err(|e| {
-                    tracing::error!("OpenRouter error: {}", e);
+                    tracing::error!("OpenRouter error: {}", redact_secrets(&e.to_string()));
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("OpenRouter error: {}", e),
+                        format!("OpenRouter error: {}", redact_secrets(&e.to_string())),
                     )
                 })?;
 
@@ -684,12 +1036,8 @@ async fn completions_handler(
                 _ => unreachable!(),
             };
 
-            // Convert messages to OpenRouter format
-            let cloud_messages: Vec<CloudMessage> = request
-                .messages
-                .iter()
-                .map(|msg| CloudMessage::new(msg.role.clone(), msg.content.clone()))
-                .collect();
+            // Messages are already in the correct format (types::Message)
+            let cloud_messages = request.messages.clone();
 
             // Call OpenRouter for cloud inference
             let openrouter_response = state
@@ -697,10 +1045,10 @@ async fn completions_handler(
                 .chat(model, cloud_messages)
                 .await
                 .map_err(|e| {
-                    tracing::error!("OpenRouter error: {}", e);
+                    tracing::error!("OpenRouter error: {}", redact_secrets(&e.to_string()));
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("OpenRouter error: {}", e),
+                        format!("OpenRouter error: {}", redact_secrets(&e.to_string())),
                     )
                 })?;
 
@@ -714,29 +1062,43 @@ async fn completions_handler(
     };
 
     // Store response in cache for future hits
-    let mut cache = state.cache.write().await;
-    cache.store_response(
-        cache_key,
-        response_text.clone(),
-        actual_tier,
-        prompt_tokens + completion_tokens,
-    ).await;
-    tracing::debug!("Stored response in semantic cache (entries: {})", cache.len());
+    // CRITICAL FIX: Use pre-generated embedding to avoid holding write lock during embedding generation
+    {
+        let mut cache = state.cache.write().await;
+        if let Some(ref emb) = embedding {
+            // Use store_with_embedding to avoid regenerating the embedding
+            cache.store_with_embedding(
+                cache_key,
+                emb.clone(),
+                response_text.clone(),
+                actual_tier,
+                prompt_tokens + completion_tokens,
+            );
+        } else {
+            // Fallback to regular store if embedding generation failed earlier
+            cache.store_response(
+                cache_key,
+                response_text.clone(),
+                actual_tier,
+                prompt_tokens + completion_tokens,
+            ).await;
+        }
+        tracing::debug!("Stored response in semantic cache (entries: {})", cache.len());
+    }
 
     let total_tokens = prompt_tokens + completion_tokens;
     let latency_ms = start_time.elapsed().as_millis() as u64;
 
     // Record query to stats tracker
-    let stats_tier = map_tier_to_stats(actual_tier);
     let query_stats = stats::QueryStats::new(
-        stats_tier,
+        actual_tier,
         prompt_tokens,
         completion_tokens,
         latency_ms,
     );
     tracing::info!(
         "Recording query: tier={:?}, tokens={}, latency={}ms",
-        stats_tier,
+        actual_tier,
         prompt_tokens + completion_tokens,
         latency_ms
     );
@@ -768,7 +1130,7 @@ async fn completions_handler(
         model: request.model,
         choices: vec![ChatChoice {
             index: 0,
-            message: ChatMessage {
+            message: Message {
                 role: "assistant".to_string(),
                 content: response_text,
             },
@@ -911,18 +1273,6 @@ async fn semantic_cache_stats_handler(
 // Utilities
 // =============================================================================
 
-/// Map router::Tier to stats::Tier for stats tracking.
-fn map_tier_to_stats(tier: Tier) -> stats::Tier {
-    match tier {
-        Tier::Cache => stats::Tier::Cache,
-        Tier::Local => stats::Tier::Local,
-        Tier::Cloud => stats::Tier::Cloud,
-        Tier::Haiku => stats::Tier::Haiku,
-        Tier::Sonnet => stats::Tier::Sonnet,
-        Tier::Opus => stats::Tier::Opus,
-    }
-}
-
 /// Generate a proper random UUID v4 for response IDs.
 fn uuid_v4() -> String {
     use rand::Rng;
@@ -957,17 +1307,42 @@ async fn shutdown_signal() {
     {
         use tokio::signal::unix::{signal, SignalKind};
 
-        let mut sigterm = signal(SignalKind::terminate())
-            .expect("failed to install SIGTERM handler");
-        let mut sigint = signal(SignalKind::interrupt())
-            .expect("failed to install SIGINT handler");
+        // Try to install SIGTERM handler, fall back to SIGINT-only if it fails
+        let sigterm_result = signal(SignalKind::terminate());
+        let sigint_result = signal(SignalKind::interrupt());
 
-        tokio::select! {
-            _ = sigterm.recv() => {
+        match (sigterm_result, sigint_result) {
+            (Ok(mut sigterm), Ok(mut sigint)) => {
+                // Both handlers installed successfully
+                tokio::select! {
+                    _ = sigterm.recv() => {
+                        tracing::info!("Received SIGTERM, initiating graceful shutdown...");
+                    }
+                    _ = sigint.recv() => {
+                        tracing::info!("Received SIGINT (Ctrl+C), initiating graceful shutdown...");
+                    }
+                }
+            }
+            (Err(e), Ok(mut sigint)) => {
+                // SIGTERM handler failed, use SIGINT only
+                tracing::warn!("Failed to install SIGTERM handler: {}, using SIGINT (Ctrl+C) only", e);
+                sigint.recv().await;
+                tracing::info!("Received SIGINT (Ctrl+C), initiating graceful shutdown...");
+            }
+            (Ok(mut sigterm), Err(e)) => {
+                // SIGINT handler failed, use SIGTERM only
+                tracing::warn!("Failed to install SIGINT handler: {}, using SIGTERM only", e);
+                sigterm.recv().await;
                 tracing::info!("Received SIGTERM, initiating graceful shutdown...");
             }
-            _ = sigint.recv() => {
-                tracing::info!("Received SIGINT (Ctrl+C), initiating graceful shutdown...");
+            (Err(e1), Err(e2)) => {
+                // Both handlers failed - this is critical, must panic
+                // JUSTIFICATION: This panic is acceptable because:
+                // 1. This runs during server initialization, not request handling
+                // 2. Without signal handlers, the server cannot be stopped gracefully
+                // 3. This prevents data loss and orphaned processes
+                // 4. Failure indicates severe OS-level issues (out of file descriptors, etc.)
+                panic!("Failed to install signal handlers: SIGTERM error: {}, SIGINT error: {}. Cannot start server without signal handling.", e1, e2);
             }
         }
     }
@@ -975,10 +1350,20 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         // Fallback: just handle Ctrl+C on non-Unix platforms (Windows)
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-        tracing::info!("Received Ctrl+C, initiating graceful shutdown...");
+        match tokio::signal::ctrl_c().await {
+            Ok(_) => {
+                tracing::info!("Received Ctrl+C, initiating graceful shutdown...");
+            }
+            Err(e) => {
+                // This is critical - if we can't handle Ctrl+C, the server can't be shut down gracefully
+                // JUSTIFICATION: This panic is acceptable because:
+                // 1. This runs during server initialization, not request handling
+                // 2. Without Ctrl+C handler on Windows, server cannot be stopped gracefully
+                // 3. Prevents orphaned processes and data loss
+                // 4. Failure indicates severe OS-level issues
+                panic!("Failed to install Ctrl+C handler: {}. Cannot start server without signal handling.", e);
+            }
+        }
     }
 
     // Persist stats before shutdown

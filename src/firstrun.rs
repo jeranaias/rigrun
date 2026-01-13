@@ -1,6 +1,7 @@
 use anyhow::Result;
 use inquire::{Select, Text};
 use super::{Config, save_config, interactive_chat, handle_cli_examples};
+use std::io::Write;
 
 mod colors {
     pub const RESET: &str = "\x1b[0m";
@@ -22,7 +23,7 @@ fn clear_screen() {
     std::io::Write::flush(&mut std::io::stdout()).ok();
 }
 
-pub fn show_first_run_menu(config: &mut Config) -> Result<()> {
+pub async fn show_first_run_menu(config: &mut Config) -> Result<()> {
     // Start with a fresh screen
     println!();
     // Box width: 62 chars total (60 inner + 2 borders)
@@ -35,24 +36,41 @@ pub fn show_first_run_menu(config: &mut Config) -> Result<()> {
     println!("{BRIGHT_CYAN}{BOLD}╚══════════════════════════════════════════════════════════╝{RESET}");
     println!();
 
-    // Check if OpenRouter API key is not set - offer setup first
-    if config.openrouter_key.is_none() {
-        prompt_openrouter_setup(config)?;
-        clear_screen();
+    // Check Ollama BEFORE wizard - this is critical
+    println!("{CYAN}[1/2]{RESET} Checking Ollama...");
+    if let Err(e) = check_ollama_setup() {
+        println!("{RED}[✗]{RESET} {}", e);
+        println!();
+        println!("{YELLOW}Fix:{RESET} Install Ollama from {CYAN}https://ollama.ai/download{RESET}");
+        println!("{YELLOW}Then:{RESET} Start Ollama with {CYAN}ollama serve{RESET}");
+        println!();
+        return Ok(());
     }
-
+    println!("{GREEN}[✓]{RESET} Ollama is ready!");
     println!();
-    println!("{WHITE}Setup complete! What would you like to do next?{RESET}");
+
+    // Download model with progress
+    println!("{CYAN}[2/2]{RESET} Setting up local model...");
+    if let Err(e) = setup_local_model_with_size_info(config).await {
+        println!("{RED}[✗]{RESET} {}", e);
+        println!();
+        return Ok(());
+    }
+    println!();
+
+    println!("{GREEN}{BOLD}[✓] Setup Complete!{RESET}");
+    println!();
+    println!("{WHITE}Your local AI is ready. Let's test it!{RESET}");
     println!();
 
     loop {
         let options = vec![
-            "💬 Start chatting now",
+            "💬 Try a quick question",
             "🔧 Set up my IDE (Cursor/VS Code/etc)",
             "📋 Learn CLI commands",
             "🚀 Run as background server",
             "❓ Learn more about these options",
-            "✨ All done - Continue running server",
+            "✨ All done - Start server",
         ];
 
         let selection = Select::new("Choose an option:", options)
@@ -60,16 +78,12 @@ pub fn show_first_run_menu(config: &mut Config) -> Result<()> {
             .prompt()?;
 
         match selection {
-            "💬 Start chatting now" => {
+            "💬 Try a quick question" => {
                 clear_screen();
                 println!();
                 println!("{GREEN}[✓]{RESET} Starting interactive chat...");
-                println!("{DIM}(The server will continue running in the background){RESET}");
+                println!("{DIM}(Type 'exit' when done){RESET}");
                 println!();
-
-                // Mark first run as complete before entering chat
-                config.first_run_complete = true;
-                save_config(config)?;
 
                 // Start chat session
                 if let Err(e) = interactive_chat(None) {
@@ -77,6 +91,14 @@ pub fn show_first_run_menu(config: &mut Config) -> Result<()> {
                 }
 
                 clear_screen();
+                println!();
+
+                // AFTER first successful local query, offer OpenRouter setup
+                if config.openrouter_key.is_none() {
+                    prompt_openrouter_setup_post_query(config)?;
+                    clear_screen();
+                }
+
                 println!();
                 println!("{GREEN}[✓]{RESET} Returning to menu...");
                 println!();
@@ -103,10 +125,13 @@ pub fn show_first_run_menu(config: &mut Config) -> Result<()> {
                 handle_learn_more()?;
                 clear_screen();
             }
-            "✨ All done - Continue running server" => {
+            "✨ All done - Start server" => {
                 config.first_run_complete = true;
                 save_config(config)?;
-                // Don't show any message - screen will be cleared by main.rs
+
+                // Show "what's next" before exiting
+                clear_screen();
+                show_whats_next(config)?;
                 break;
             }
             _ => {}
@@ -119,7 +144,7 @@ pub fn show_first_run_menu(config: &mut Config) -> Result<()> {
 /// Prompts the user to set up an OpenRouter API key for cloud fallback
 fn prompt_openrouter_setup(config: &mut Config) -> Result<()> {
     println!();
-    println!("{CYAN}{BOLD}Cloud Fallback Setup{RESET}");
+    println!("{CYAN}{BOLD}Cloud Fallback Setup (Optional){RESET}");
     println!();
     println!("{WHITE}RigRun works best with a cloud fallback for complex queries.{RESET}");
     println!("{DIM}Local models handle most requests (free!), but an API key enables{RESET}");
@@ -127,16 +152,28 @@ fn prompt_openrouter_setup(config: &mut Config) -> Result<()> {
     println!();
 
     let options = vec![
-        "Yes, let's do it",
-        "No, local-only for now",
+        "Set up now",
+        "Skip for now (can add later)",
     ];
 
-    let selection = Select::new("Would you like to set up cloud access now?", options)
-        .with_help_message("↑↓ to move, enter to select")
-        .prompt()?;
+    let selection = Select::new("Would you like to set up cloud access?", options)
+        .with_help_message("↑↓ to move, enter to select, Esc to skip")
+        .prompt();
+
+    // Handle cancellation gracefully
+    let selection = match selection {
+        Ok(s) => s,
+        Err(_) => {
+            println!();
+            println!("{YELLOW}[!]{RESET} Skipped. You can set this up later with:");
+            println!("    {CYAN}rigrun config --openrouter-key YOUR_KEY{RESET}");
+            println!();
+            return Ok(());
+        }
+    };
 
     match selection {
-        "Yes, let's do it" => {
+        "Set up now" => {
             println!();
             println!("{CYAN}[...]{RESET} Opening OpenRouter... Create a free account and generate an API key.");
             println!();
@@ -205,9 +242,10 @@ fn prompt_openrouter_setup(config: &mut Config) -> Result<()> {
                 }
             }
         }
-        "No, local-only for now" => {
+        "Skip for now (can add later)" => {
             println!();
-            println!("{GREEN}[✓]{RESET} No problem! You can set this up later with {CYAN}`rigrun config`{RESET}");
+            println!("{GREEN}[✓]{RESET} No problem! You can set this up later with:");
+            println!("    {CYAN}rigrun config --openrouter-key YOUR_KEY{RESET}");
             println!();
         }
         _ => {}
@@ -706,8 +744,8 @@ fn handle_learn_more() -> Result<()> {
     println!("{BRIGHT_CYAN}{BOLD}=== Learn More About These Options ==={RESET}");
     println!();
 
-    // Option 1: Start chatting now
-    println!("{CYAN}{BOLD}💬 Start chatting now{RESET}");
+    // Option 1: Try a quick question
+    println!("{CYAN}{BOLD}💬 Try a quick question{RESET}");
     println!("{DIM}   Opens an interactive chat session right in your terminal{RESET}");
     println!("{DIM}   Great for quick questions, code generation, debugging help{RESET}");
     println!("{DIM}   Conversation context is maintained throughout the session{RESET}");
@@ -744,6 +782,181 @@ fn handle_learn_more() -> Result<()> {
     // Auto-return to menu after a brief pause
     println!("{DIM}Got it! Returning to menu...{RESET}");
     std::thread::sleep(std::time::Duration::from_millis(1200));
+
+    Ok(())
+}
+
+/// Check if Ollama is installed and running
+fn check_ollama_setup() -> Result<()> {
+    use rigrun::detect::check_ollama_available;
+    use rigrun::local::OllamaClient;
+
+    // Check if Ollama is installed
+    if !check_ollama_available() {
+        anyhow::bail!("Ollama not found");
+    }
+
+    // Check if Ollama is running
+    let client = OllamaClient::new();
+    if !client.check_ollama_running() {
+        anyhow::bail!("Ollama not running");
+    }
+
+    Ok(())
+}
+
+/// Set up local model with size information displayed BEFORE download
+async fn setup_local_model_with_size_info(config: &mut Config) -> Result<()> {
+    use rigrun::detect::{detect_gpu, recommend_model, is_model_available};
+
+    let gpu = detect_gpu().unwrap_or_default();
+    let model = config
+        .model
+        .clone()
+        .unwrap_or_else(|| recommend_model(gpu.vram_gb));
+
+    // Check if model is already downloaded
+    if is_model_available(&model) {
+        println!("{GREEN}[✓]{RESET} Model {WHITE}{BOLD}{model}{RESET} already downloaded");
+        return Ok(());
+    }
+
+    // Show model size info BEFORE downloading
+    let size_info = get_model_size(&model);
+    println!();
+    println!("{YELLOW}[!]{RESET} Model {WHITE}{BOLD}{model}{RESET} needs to be downloaded");
+    println!("    {WHITE}Size: {BOLD}{}{RESET}", size_info.0);
+    println!("    {DIM}This is a ONE-TIME download. Future starts are instant.{RESET}");
+    println!();
+
+    // Ask for confirmation
+    let options = vec!["Download now", "Skip for now"];
+    let selection = inquire::Select::new("Ready to download?", options)
+        .with_help_message("↑↓ to move, enter to select")
+        .prompt()?;
+
+    match selection {
+        "Download now" => {
+            println!();
+            println!("{CYAN}[...]{RESET} Downloading {model}...");
+
+            // Download with progress
+            use rigrun::local::OllamaClient;
+            let client = OllamaClient::new();
+
+            client.pull_model_with_progress(&model, |progress| {
+                if let Some(pct) = progress.percentage() {
+                    print!("\r{CYAN}[↓]{RESET} {}: {:.1}%  ", progress.status, pct);
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                } else {
+                    print!("\r{CYAN}[↓]{RESET} {}  ", progress.status);
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                }
+            })?;
+
+            println!();
+            println!("{GREEN}[✓]{RESET} Model ready!");
+            config.model = Some(model);
+            save_config(config)?;
+            Ok(())
+        }
+        "Skip for now" => {
+            println!();
+            println!("{YELLOW}[!]{RESET} Skipped download. You can download later with:");
+            println!("    {CYAN}rigrun pull {model}{RESET}");
+            Err(anyhow::anyhow!("Model download skipped"))
+        }
+        _ => Ok(())
+    }
+}
+
+/// Get model size information
+fn get_model_size(model: &str) -> (&'static str, &'static str) {
+    // (display_size, disk_requirement)
+    match model {
+        m if m.contains("1.5b") => ("~1 GB", "4GB+ VRAM recommended"),
+        m if m.contains("3b") => ("~2 GB", "6GB+ VRAM recommended"),
+        m if m.contains("7b") => ("~4.2 GB", "10GB+ VRAM recommended"),
+        m if m.contains("14b") => ("~8 GB", "16GB+ VRAM recommended"),
+        m if m.contains("32b") => ("~18 GB", "24GB+ VRAM recommended"),
+        m if m.contains("16b") => ("~10 GB", "16GB+ VRAM recommended"),
+        _ => ("Unknown size", "Check model specs"),
+    }
+}
+
+/// Prompt for OpenRouter setup AFTER first local query
+fn prompt_openrouter_setup_post_query(config: &mut Config) -> Result<()> {
+    println!();
+    println!("{GREEN}[✓]{RESET} Great! Your local AI is working perfectly!");
+    println!();
+    println!("{CYAN}{BOLD}Want Cloud Fallback?{RESET}");
+    println!();
+    println!("{DIM}Local handles most queries (free!), but you can add cloud routing{RESET}");
+    println!("{DIM}for harder tasks. Would you like to set up OpenRouter now?{RESET}");
+    println!();
+
+    let options = vec![
+        "Yes, set it up",
+        "No thanks, local-only is fine",
+    ];
+
+    let selection = inquire::Select::new("Choose an option:", options)
+        .with_help_message("↑↓ to move, enter to select")
+        .prompt()?;
+
+    match selection {
+        "Yes, set it up" => {
+            prompt_openrouter_setup(config)?;
+        }
+        "No thanks, local-only is fine" => {
+            println!();
+            println!("{GREEN}[✓]{RESET} Perfect! You can add this later with {CYAN}rigrun config{RESET}");
+            println!();
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+/// Show what's next after setup completes
+fn show_whats_next(config: &Config) -> Result<()> {
+    println!();
+    println!("{BRIGHT_CYAN}{BOLD}╔══════════════════════════════════════════════════════════╗{RESET}");
+    println!("{BRIGHT_CYAN}{BOLD}║                                                          ║{RESET}");
+    println!("{BRIGHT_CYAN}{BOLD}║               {GREEN}Setup Complete! What's Next?{BRIGHT_CYAN}                ║{RESET}");
+    println!("{BRIGHT_CYAN}{BOLD}║                                                          ║{RESET}");
+    println!("{BRIGHT_CYAN}{BOLD}╚══════════════════════════════════════════════════════════╝{RESET}");
+    println!();
+
+    println!("{WHITE}{BOLD}The server is starting...{RESET}");
+    println!();
+    println!("{CYAN}Quick Start Guide:{RESET}");
+    println!();
+    println!("  {GREEN}1.{RESET} {WHITE}Server will be at:{RESET} {CYAN}{BOLD}http://localhost:8787{RESET}");
+    println!();
+    println!("  {GREEN}2.{RESET} {WHITE}Try from command line:{RESET}");
+    println!("     {DIM}rigrun \"explain recursion\"{RESET}");
+    println!("     {DIM}rigrun chat{RESET}");
+    println!();
+    println!("  {GREEN}3.{RESET} {WHITE}Connect your IDE:{RESET}");
+    println!("     {DIM}Use endpoint: http://localhost:8787/v1{RESET}");
+    println!("     {DIM}Model name: auto{RESET}");
+    println!();
+
+    if config.openrouter_key.is_some() {
+        println!("  {GREEN}[✓]{RESET} Cloud fallback: {GREEN}Enabled{RESET}");
+    } else {
+        println!("  {YELLOW}[i]{RESET} Cloud fallback: {DIM}Not configured{RESET}");
+        println!("     {DIM}Add later: {WHITE}rigrun config --openrouter-key YOUR_KEY{RESET}");
+    }
+
+    println!();
+    println!("{DIM}Press Ctrl+C to stop the server anytime{RESET}");
+    println!();
+
+    // Brief pause to let user read
+    std::thread::sleep(std::time::Duration::from_secs(3));
 
     Ok(())
 }
