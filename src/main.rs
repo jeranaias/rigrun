@@ -25,6 +25,7 @@ use rigrun::detect::{
 use rigrun::local::{OllamaClient, Message};
 
 mod background;
+mod consent_banner;
 mod firstrun;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -76,6 +77,18 @@ struct Cli {
     /// Paranoid mode: block ALL cloud requests (local-only operation)
     #[arg(long, global = true)]
     paranoid: bool,
+
+    /// Skip DoD consent banner (for CI/automated environments - will be logged)
+    #[arg(long, global = true)]
+    skip_banner: bool,
+
+    /// Skip the first-run wizard (use defaults)
+    #[arg(long, global = true)]
+    no_wizard: bool,
+
+    /// Run quick setup wizard (minimal prompts, recommended defaults)
+    #[arg(long, global = true)]
+    quick_setup: bool,
 }
 
 #[derive(Subcommand)]
@@ -128,14 +141,36 @@ enum Commands {
         command: Option<ConfigCommands>,
     },
 
-    /// Setup operations (IDE, GPU)
+    /// Unified setup wizard - ONE command to rule them all
+    ///
+    /// Replaces 6 conflicting docs and 20+ manual steps with a single command.
+    /// Auto-detects hardware, downloads optimal model, generates secure config.
     ///
     /// Examples:
-    ///   rigrun setup ide
-    ///   rigrun setup gpu
+    ///   rigrun setup              # Auto-detect everything
+    ///   rigrun setup --quick      # Essential setup only
+    ///   rigrun setup --full       # Full setup with all features
+    ///   rigrun setup --hardware nvidia   # Force NVIDIA mode
+    ///   rigrun setup --hardware amd      # Force AMD mode
+    ///   rigrun setup --hardware cpu      # Force CPU-only mode
+    ///   rigrun setup ide          # Legacy: IDE setup only
+    ///   rigrun setup gpu          # Legacy: GPU setup only
     Setup {
+        /// Quick setup - just the essentials to get running
+        #[arg(long, conflicts_with = "full")]
+        quick: bool,
+
+        /// Full setup with all features and optimizations
+        #[arg(long, conflicts_with = "quick")]
+        full: bool,
+
+        /// Hardware mode: auto, nvidia, amd, or cpu
+        #[arg(long, value_name = "MODE")]
+        hardware: Option<String>,
+
+        /// Legacy subcommands (ide, gpu)
         #[command(subcommand)]
-        command: SetupCommands,
+        command: Option<SetupCommands>,
     },
 
     /// Cache operations
@@ -153,7 +188,15 @@ enum Commands {
     ///
     /// Examples:
     ///   rigrun doctor
-    Doctor,
+    ///   rigrun doctor --fix
+    Doctor {
+        /// Auto-fix issues where possible
+        #[arg(long)]
+        fix: bool,
+        /// Check network connectivity for hybrid cloud mode
+        #[arg(long)]
+        check_network: bool,
+    },
 
     /// List available and downloaded models
     ///
@@ -239,11 +282,28 @@ enum SetupCommands {
     ///   rigrun setup ide
     Ide,
 
-    /// Interactive GPU setup wizard
+    /// Interactive GPU setup wizard (legacy - use 'rigrun setup' instead)
     ///
     /// Example:
     ///   rigrun setup gpu
     Gpu,
+
+    /// Run unified setup wizard (same as 'rigrun setup')
+    ///
+    /// Example:
+    ///   rigrun setup wizard
+    #[command(hide = true)]
+    Wizard {
+        /// Quick setup - just the essentials
+        #[arg(long)]
+        quick: bool,
+        /// Full setup with all features
+        #[arg(long)]
+        full: bool,
+        /// Hardware mode: auto, nvidia, amd, or cpu
+        #[arg(long)]
+        hardware: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -285,9 +345,17 @@ pub struct Config {
     /// Paranoid mode: block all cloud requests (default: false)
     #[serde(default)]
     pub paranoid_mode: bool,
+    /// Enable DoD consent banner on startup (default: true for IL5 compliance)
+    /// Set to false for non-DoD deployments
+    #[serde(default = "default_dod_banner_enabled")]
+    pub dod_banner_enabled: bool,
 }
 
 fn default_audit_log_enabled() -> bool {
+    true
+}
+
+fn default_dod_banner_enabled() -> bool {
     true
 }
 
@@ -2275,16 +2343,59 @@ fn check_port_available(port: u16) -> anyhow::Result<()> {
 /// This is separated from main() to avoid runtime conflicts with blocking code.
 async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_mode: bool) -> Result<()> {
     match command {
-        AsyncCommand::StartServer => {
-            // Check if this is first run
-            if !config.first_run_complete {
-                // FIRST RUN: Show wizard ONLY, start server AFTER wizard completes
-                clear_screen();
-                if let Err(e) = firstrun::show_first_run_menu(config).await {
-                    eprintln!("{YELLOW}[!]{RESET} Setup error: {}", e);
+        AsyncCommand::StartServer { no_wizard, quick_setup } => {
+            // Use the new wizard module for first run detection
+            use rigrun::firstrun::{is_first_run, run_wizard, run_quick_wizard};
+
+            // Check if this is first run (and wizard not skipped)
+            let should_run_wizard = is_first_run() && !config.first_run_complete && !no_wizard;
+
+            if should_run_wizard {
+                // FIRST RUN: Show new wizard
+                if quick_setup {
+                    // Quick setup mode - minimal prompts
+                    if let Err(e) = run_quick_wizard().await {
+                        eprintln!("{YELLOW}[!]{RESET} Quick setup error: {}", e);
+                        // Fall back to old wizard if new one fails
+                        if let Err(e2) = firstrun::show_first_run_menu(config).await {
+                            eprintln!("{YELLOW}[!]{RESET} Fallback setup error: {}", e2);
+                        }
+                    }
+                } else {
+                    // Full interactive wizard
+                    if let Err(e) = run_wizard().await {
+                        eprintln!("{YELLOW}[!]{RESET} Wizard error: {}", e);
+                        // Fall back to old wizard if new one fails
+                        if let Err(e2) = firstrun::show_first_run_menu(config).await {
+                            eprintln!("{YELLOW}[!]{RESET} Fallback setup error: {}", e2);
+                        }
+                    }
+                }
+
+                // Reload config after wizard completes
+                if let Ok(new_config) = load_config() {
+                    *config = new_config;
                 }
 
                 // After wizard completes, clear screen and start clean server
+                clear_screen();
+                print_banner();
+                if paranoid_mode {
+                    print_paranoid_banner();
+                }
+                start_server(config).await?;
+            } else if no_wizard && is_first_run() {
+                // First run but wizard skipped - use defaults
+                println!("{YELLOW}[!]{RESET} First run wizard skipped (--no-wizard flag)");
+                println!("{YELLOW}[!]{RESET} Using default configuration. Run {CYAN}rigrun setup{RESET} later to configure.");
+                println!();
+
+                // Mark first run complete with defaults
+                config.first_run_complete = true;
+                if let Err(e) = save_config(config) {
+                    eprintln!("{YELLOW}[!]{RESET} Failed to save config: {}", e);
+                }
+
                 clear_screen();
                 print_banner();
                 if paranoid_mode {
@@ -2310,11 +2421,41 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
         AsyncCommand::IdeSetup => {
             handle_ide_setup().await?;
         }
-        AsyncCommand::Doctor => {
-            run_doctor().await?;
+        AsyncCommand::Doctor { fix, check_network } => {
+            run_doctor(fix, check_network).await?;
         }
         AsyncCommand::Pull { model } => {
             pull_model(model).await?;
+        }
+        AsyncCommand::UnifiedSetup { quick, full, hardware } => {
+            // Run unified setup wizard
+            match rigrun::run_setup(quick, full, hardware) {
+                Ok(result) => {
+                    if !result.success {
+                        std::process::exit(1);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{RED}[!]{RESET} Setup failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        AsyncCommand::RunWizard { quick } => {
+            // Explicitly run the new wizard
+            use rigrun::firstrun::{run_wizard, run_quick_wizard};
+
+            if quick {
+                if let Err(e) = run_quick_wizard().await {
+                    eprintln!("{RED}[!]{RESET} Quick wizard failed: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                if let Err(e) = run_wizard().await {
+                    eprintln!("{RED}[!]{RESET} Wizard failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     }
     Ok(())
@@ -2322,11 +2463,13 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
 
 /// Commands that require async runtime
 enum AsyncCommand {
-    StartServer,
+    StartServer { no_wizard: bool, quick_setup: bool },
     Ask { question: Option<String>, model: Option<String>, file: Option<String> },
     IdeSetup,
-    Doctor,
+    Doctor { fix: bool, check_network: bool },
     Pull { model: String },
+    UnifiedSetup { quick: bool, full: bool, hardware: Option<String> },
+    RunWizard { quick: bool },
 }
 
 fn main() -> Result<()> {
@@ -2345,6 +2488,14 @@ fn main() -> Result<()> {
     // Initialize audit logging based on config
     if let Err(e) = rigrun::init_audit_logger(config.audit_log_enabled) {
         eprintln!("{YELLOW}[!]{RESET} Failed to initialize audit logging: {}", e);
+    }
+
+    // DoD Consent Banner - IL5 REQUIREMENT
+    // Must be displayed and acknowledged before system use (unless explicitly skipped)
+    if let Err(e) = consent_banner::handle_consent_banner(cli.skip_banner, config.dod_banner_enabled) {
+        eprintln!("{RED}[!]{RESET} Failed to handle DoD consent banner: {}", e);
+        eprintln!("{RED}[!]{RESET} Cannot proceed without consent acknowledgment.");
+        std::process::exit(1);
     }
 
     // Check if we have a prompt argument (either direct prompt or stdin)
@@ -2374,11 +2525,22 @@ fn main() -> Result<()> {
             model: model.clone(),
             file: file.clone(),
         }),
-        Some(Commands::Setup { command }) => match command {
-            SetupCommands::Ide => Some(AsyncCommand::IdeSetup),
-            SetupCommands::Gpu => None, // Sync
+        Some(Commands::Setup { quick, full, hardware, command }) => match command {
+            // Unified setup wizard (default when no subcommand specified)
+            None => Some(AsyncCommand::UnifiedSetup {
+                quick: *quick,
+                full: *full,
+                hardware: hardware.clone(),
+            }),
+            Some(SetupCommands::Ide) => Some(AsyncCommand::IdeSetup),
+            Some(SetupCommands::Gpu) => None, // Sync
+            Some(SetupCommands::Wizard { quick, full, hardware }) => Some(AsyncCommand::UnifiedSetup {
+                quick: *quick,
+                full: *full,
+                hardware: hardware.clone(),
+            }),
         },
-        Some(Commands::Doctor) => Some(AsyncCommand::Doctor),
+        Some(Commands::Doctor { fix, check_network }) => Some(AsyncCommand::Doctor { fix: *fix, check_network: *check_network }),
         Some(Commands::Pull { model }) => Some(AsyncCommand::Pull { model: model.clone() }),
         Some(Commands::IdeSetup) => Some(AsyncCommand::IdeSetup), // Legacy
         _ => None, // All other commands are synchronous
@@ -2408,12 +2570,12 @@ fn main() -> Result<()> {
         Some(Commands::Config { command }) => {
             handle_config(command)?;
         }
-        Some(Commands::Setup { command }) => {
+        Some(Commands::Setup { quick: _, full: _, hardware: _, command }) => {
             match command {
-                SetupCommands::Gpu => {
+                Some(SetupCommands::Gpu) => {
                     handle_gpu_setup()?;
                 }
-                _ => unreachable!(), // Ide handled above
+                _ => unreachable!(), // UnifiedSetup, Ide, and Wizard handled in async
             }
         }
         Some(Commands::Cache { command }) => {

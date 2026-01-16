@@ -26,7 +26,12 @@
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
+
+use crate::types::{StreamChunk, PartialResponse, InterruptReason};
 
 // Re-export Message from types for API compatibility
 pub use crate::types::Message;
@@ -952,20 +957,35 @@ impl OllamaClient {
             ))));
         }
 
-        // Process streaming response
-        let body = response.text().context("Failed to read chat response")?;
-
+        // TRUE STREAMING: Process response as it arrives using BufReader
         let mut full_response = String::new();
         let mut prompt_tokens = 0;
         let mut completion_tokens = 0;
         let mut total_duration = 0;
 
-        for line in body.lines() {
+        // Use BufReader to read line by line as data arrives
+        let reader = BufReader::new(response);
+        for line_result in reader.lines() {
+            let line = match line_result {
+                Ok(l) => l,
+                Err(e) => {
+                    // Connection might have been dropped
+                    if full_response.is_empty() {
+                        return Err(anyhow!(OllamaError::NetworkError(format!(
+                            "Connection error during streaming: {}",
+                            e
+                        ))));
+                    }
+                    // Return partial response if we have some content
+                    break;
+                }
+            };
+
             if line.is_empty() {
                 continue;
             }
 
-            if let Ok(chunk) = serde_json::from_str::<ChatResponse>(line) {
+            if let Ok(chunk) = serde_json::from_str::<ChatResponse>(&line) {
                 if let Some(error) = chunk.error {
                     if error.contains("not found") {
                         return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
@@ -977,6 +997,7 @@ impl OllamaClient {
                 }
 
                 if let Some(msg) = chunk.message {
+                    // Call callback IMMEDIATELY as token arrives
                     chunk_callback(&msg.content);
                     full_response.push_str(&msg.content);
                 }
@@ -995,6 +1016,231 @@ impl OllamaClient {
             completion_tokens,
             total_duration_ms: total_duration / 1_000_000,
         })
+    }
+
+    /// Perform a chat completion with TRUE streaming and cancellation support.
+    ///
+    /// This method streams tokens as they arrive from Ollama's API and supports
+    /// cancellation via an atomic flag. If cancelled, returns the partial response
+    /// received so far.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model to use for chat
+    /// * `messages` - A vector of chat messages
+    /// * `chunk_callback` - A function called with each StreamChunk
+    /// * `cancel_flag` - Optional atomic flag to signal cancellation
+    ///
+    /// # Returns
+    ///
+    /// `Ok(OllamaResponse)` on success, or `Err` with `PartialResponse` embedded
+    /// if cancelled or interrupted.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use rigrun::local::{OllamaClient, Message};
+    /// use std::sync::atomic::{AtomicBool, Ordering};
+    /// use std::sync::Arc;
+    ///
+    /// let client = OllamaClient::new();
+    /// let messages = vec![Message::user("Hello!")];
+    /// let cancel = Arc::new(AtomicBool::new(false));
+    ///
+    /// let result = client.chat_stream_cancellable(
+    ///     "llama3.2:latest",
+    ///     messages,
+    ///     |chunk| {
+    ///         print!("{}", chunk.token);
+    ///     },
+    ///     Some(cancel.clone()),
+    /// );
+    /// # Ok::<(), anyhow::Error>(())
+    /// ```
+    pub fn chat_stream_cancellable<F>(
+        &self,
+        model: &str,
+        messages: Vec<Message>,
+        mut chunk_callback: F,
+        cancel_flag: Option<Arc<AtomicBool>>,
+    ) -> Result<OllamaResponse>
+    where
+        F: FnMut(StreamChunk),
+    {
+        let url = format!("{}/api/chat", self.base_url);
+
+        let request_body = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": true
+        });
+
+        let response = self.client
+            .post(&url)
+            .json(&request_body)
+            .timeout(self.generation_timeout)
+            .send()
+            .map_err(|e| {
+                if e.is_connect() {
+                    anyhow!(OllamaError::NotRunning(format!(
+                        "Cannot connect to Ollama at {}.",
+                        self.base_url
+                    )))
+                } else if e.is_timeout() {
+                    anyhow!(OllamaError::Timeout(format!(
+                        "Streaming chat request timed out after {} seconds.",
+                        self.generation_timeout.as_secs()
+                    )))
+                } else {
+                    anyhow!(OllamaError::NetworkError(format!(
+                        "Failed to stream chat: {}",
+                        e
+                    )))
+                }
+            })?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().unwrap_or_default();
+
+            if status.as_u16() == 404 || error_text.contains("not found") {
+                return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
+            }
+
+            return Err(anyhow!(OllamaError::ApiError(format!(
+                "Streaming chat failed with HTTP {}: {}",
+                status, error_text
+            ))));
+        }
+
+        // TRUE STREAMING with cancellation support
+        let mut full_response = String::new();
+        let mut prompt_tokens = 0;
+        let mut completion_tokens = 0;
+        let mut total_duration = 0;
+        let mut token_count = 0u32;
+
+        let reader = BufReader::new(response);
+        for line_result in reader.lines() {
+            // Check for cancellation
+            if let Some(ref flag) = cancel_flag {
+                if flag.load(Ordering::Relaxed) {
+                    // Send done chunk to signal cancellation
+                    chunk_callback(StreamChunk::done_with_count(token_count));
+
+                    // Return partial response info via error
+                    let partial = PartialResponse {
+                        text: full_response,
+                        tokens_received: token_count,
+                        reason: InterruptReason::UserCancel,
+                    };
+                    return Err(anyhow::anyhow!("Stream cancelled by user")
+                        .context(format!("Partial response: {} tokens", partial.tokens_received)));
+                }
+            }
+
+            let line = match line_result {
+                Ok(l) => l,
+                Err(e) => {
+                    if full_response.is_empty() {
+                        return Err(anyhow!(OllamaError::NetworkError(format!(
+                            "Connection error during streaming: {}",
+                            e
+                        ))));
+                    }
+                    // Connection dropped mid-stream - return what we have
+                    chunk_callback(StreamChunk::done_with_count(token_count));
+                    break;
+                }
+            };
+
+            if line.is_empty() {
+                continue;
+            }
+
+            if let Ok(chunk) = serde_json::from_str::<ChatResponse>(&line) {
+                if let Some(error) = chunk.error {
+                    if error.contains("not found") {
+                        return Err(anyhow!(OllamaError::ModelNotFound(model.to_string())));
+                    }
+                    // Error mid-stream
+                    chunk_callback(StreamChunk::done_with_count(token_count));
+                    return Err(anyhow!(OllamaError::ApiError(format!(
+                        "Ollama returned an error during streaming: {}",
+                        error
+                    ))));
+                }
+
+                if let Some(msg) = chunk.message {
+                    if !msg.content.is_empty() {
+                        token_count += 1;
+                        // Stream the token IMMEDIATELY
+                        chunk_callback(StreamChunk {
+                            token: msg.content.clone(),
+                            done: false,
+                            tokens_so_far: Some(token_count),
+                        });
+                        full_response.push_str(&msg.content);
+                    }
+                }
+
+                if chunk.done {
+                    prompt_tokens = chunk.prompt_eval_count;
+                    completion_tokens = chunk.eval_count;
+                    total_duration = chunk.total_duration;
+
+                    // Send final done chunk
+                    chunk_callback(StreamChunk::done_with_count(completion_tokens));
+                }
+            }
+        }
+
+        Ok(OllamaResponse {
+            response: full_response,
+            prompt_tokens,
+            completion_tokens,
+            total_duration_ms: total_duration / 1_000_000,
+        })
+    }
+
+    /// Async version of streaming chat with cancellation support.
+    ///
+    /// Uses tokio channels to stream tokens asynchronously.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model to use for chat
+    /// * `messages` - A vector of chat messages
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (receiver for stream chunks, join handle for the task).
+    pub fn chat_stream_async(
+        &self,
+        model: &str,
+        messages: Vec<Message>,
+    ) -> (
+        tokio::sync::mpsc::Receiver<StreamChunk>,
+        tokio::task::JoinHandle<Result<OllamaResponse>>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::channel::<StreamChunk>(32);
+        let client = self.clone();
+        let model = model.to_string();
+
+        let handle = tokio::task::spawn_blocking(move || {
+            client.chat_stream_cancellable(
+                &model,
+                messages,
+                |chunk| {
+                    // Try to send, ignore if receiver dropped
+                    let _ = tx.blocking_send(chunk);
+                },
+                None,
+            )
+        });
+
+        (rx, handle)
     }
 }
 

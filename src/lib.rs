@@ -25,11 +25,17 @@
 pub mod audit;
 pub mod cache;
 pub mod cloud;
+pub mod consent_banner;
 pub mod detect;
 pub mod error;
+pub mod errors;
+pub mod health;
+pub mod firstrun;
 pub mod local;
 pub mod router;
+pub mod security;
 pub mod server;
+pub mod setup;
 pub mod stats;
 pub mod types;
 pub mod utils;
@@ -85,3 +91,43 @@ pub use audit::{
 
 // Re-export error utilities
 pub use error::{format_error, format_simple_error, ErrorBuilder, GITHUB_ISSUES_URL};
+
+// Re-export IL5-compliant error handling (NIST 800-53 SI-11)
+pub use errors::{
+    UserError, ErrorResponse, ApiResult,
+    generate_reference_code, sanitize_error_details, contains_sensitive_info,
+    map_error, map_anyhow_error, map_io_error,
+};
+
+// Re-export security types (DoD STIG compliance)
+pub use security::{
+    Session, SessionConfig, SessionManager, SessionState, SessionEvent,
+    DOD_STIG_MAX_SESSION_TIMEOUT_SECS, DOD_STIG_WARNING_BEFORE_TIMEOUT_SECS,
+};
+
+// Re-export setup types
+pub use setup::{
+    run_setup, SetupWizard, SetupMode, SetupResult, HardwareMode,
+    RigrunConfig, GeneralConfig, HardwareConfig, ModelConfig, ServerConfig, SecurityConfig,
+};
+
+// Re-export consent banner types (DoD IL5 compliance)
+pub use consent_banner::{
+    handle_consent_banner, display_and_acknowledge, should_display_banner,
+    is_ci_environment, is_interactive, consent_log_path, log_consent,
+    ConsentAcknowledgment, DOD_CONSENT_BANNER_TEXT,
+};
+
+// Re-export first-run wizard types
+pub use firstrun::{
+    is_first_run, mark_wizard_complete, run_wizard, run_quick_wizard,
+    WizardConfig, DeploymentMode, UseCase, ModelSelection,
+    download_model_with_progress, run_health_check, generate_config,
+};
+
+// Re-export health check types
+pub use health::{
+    HealthChecker, HealthStatus, HealthIssue, Severity,
+    run_health_check as health_check, run_quick_health_check, auto_fix_issues,
+    format_health_status, GpuInfoStatus,
+};
