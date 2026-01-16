@@ -82,6 +82,9 @@ indexmap = { version = "2.0", features = ["serde"] }
 # Terminal manipulation for live stats
 crossterm = "0.27"
 
+# Ctrl+C signal handling
+ctrlc = "3.4"
+
 # Random number generation for UUIDs
 rand = "0.8"
 

@@ -999,6 +999,107 @@ pub fn format_health_status(status: &HealthStatus) -> String {
     output
 }
 
+/// Result of a startup health check
+pub enum StartupHealthResult {
+    /// All checks passed, system is ready
+    Ready,
+    /// Warnings present but system can start
+    Warnings(Vec<HealthIssue>),
+    /// Critical issues prevent startup
+    Critical(Vec<HealthIssue>),
+}
+
+/// Runs a quick health check on startup and returns whether the system can proceed.
+///
+/// This function is designed to be called during rigrun startup to ensure
+/// the system is properly configured before accepting queries.
+///
+/// # Returns
+/// - `StartupHealthResult::Ready` if all checks pass
+/// - `StartupHealthResult::Warnings` if there are warnings but system can operate
+/// - `StartupHealthResult::Critical` if there are critical issues that prevent operation
+///
+/// # Example
+///
+/// ```no_run
+/// use rigrun::health::{check_startup_health, StartupHealthResult};
+///
+/// match check_startup_health() {
+///     StartupHealthResult::Ready => {
+///         println!("System ready!");
+///     }
+///     StartupHealthResult::Warnings(warnings) => {
+///         for w in &warnings {
+///             eprintln!("[!] {}: {}", w.component, w.message);
+///         }
+///         println!("Starting with warnings...");
+///     }
+///     StartupHealthResult::Critical(errors) => {
+///         for e in &errors {
+///             eprintln!("[X] {}: {}", e.component, e.message);
+///             eprintln!("    Fix: {}", e.fix);
+///         }
+///         std::process::exit(1);
+///     }
+/// }
+/// ```
+pub fn check_startup_health() -> StartupHealthResult {
+    let status = HealthChecker::new().run_quick_check();
+
+    let critical: Vec<HealthIssue> = status.issues.iter()
+        .filter(|i| i.severity == Severity::Critical)
+        .cloned()
+        .collect();
+
+    let warnings: Vec<HealthIssue> = status.issues.iter()
+        .filter(|i| i.severity == Severity::Warning)
+        .cloned()
+        .collect();
+
+    if !critical.is_empty() {
+        StartupHealthResult::Critical(critical)
+    } else if !warnings.is_empty() {
+        StartupHealthResult::Warnings(warnings)
+    } else {
+        StartupHealthResult::Ready
+    }
+}
+
+/// Prints startup health warnings to stderr with colored output.
+///
+/// This is a convenience function to display startup warnings in a consistent format.
+pub fn print_startup_warnings(warnings: &[HealthIssue]) {
+    if warnings.is_empty() {
+        return;
+    }
+
+    eprintln!();
+    eprintln!("Startup warnings:");
+    for w in warnings {
+        eprintln!("  [!] {}: {}", w.component, w.message);
+        eprintln!("      Fix: {}", w.fix);
+    }
+    eprintln!();
+}
+
+/// Prints critical errors and exits.
+///
+/// This function displays critical errors that prevent rigrun from starting
+/// and then exits with code 1.
+pub fn print_critical_and_exit(errors: &[HealthIssue]) -> ! {
+    eprintln!();
+    eprintln!("Critical errors - cannot start rigrun:");
+    eprintln!();
+    for e in errors {
+        eprintln!("  [X] {}: {}", e.component, e.message);
+        eprintln!("      Fix: {}", e.fix);
+        eprintln!();
+    }
+    eprintln!("Run 'rigrun doctor' for detailed diagnostics.");
+    eprintln!();
+    std::process::exit(1);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

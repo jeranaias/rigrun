@@ -485,7 +485,7 @@ pub fn download_model_with_progress(model: &str) -> Result<()> {
         if let Some(pct) = progress.percentage() {
             if (pct - last_percentage).abs() >= 1.0 || pct >= 99.9 {
                 last_percentage = pct;
-                let bar_width = 40;
+                let bar_width: usize = 40;
                 let filled = ((pct / 100.0) * bar_width as f64) as usize;
                 let empty = bar_width.saturating_sub(filled);
 

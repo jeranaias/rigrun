@@ -8,6 +8,8 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::path::PathBuf;
 use std::time::Instant;
 use crossterm::{
@@ -26,7 +28,9 @@ use rigrun::local::{OllamaClient, Message};
 
 mod background;
 mod consent_banner;
-mod firstrun;
+
+// Use firstrun from the library crate
+use rigrun::firstrun;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_PORT: u16 = 8787;
@@ -1136,44 +1140,100 @@ fn direct_prompt(prompt: &str, model: Option<String>) -> Result<()> {
     let messages = vec![Message::user(prompt)];
 
     let start = Instant::now();
+    let mut first_token_received = false;
+    let mut time_to_first_token = 0u128;
 
-    let response = client.chat_stream(&model, messages, |chunk| {
-        print!("{}", chunk);
-        io::stdout().flush().ok();
-    })?;
+    // Show thinking indicator
+    print!("{}", "Thinking...".bright_black());
+    io::stdout().flush().ok();
+
+    // Set up Ctrl+C handling for cancellation
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let cancel_flag_clone = cancel_flag.clone();
+    let _ = ctrlc::set_handler(move || {
+        cancel_flag_clone.store(true, Ordering::Relaxed);
+    });
+
+    let response = client.chat_stream_cancellable(&model, messages, |chunk| {
+        if !first_token_received {
+            first_token_received = true;
+            time_to_first_token = start.elapsed().as_millis();
+            // Clear thinking indicator and show first token
+            print!("\r{}\r", " ".repeat(12));
+            io::stdout().flush().ok();
+        }
+        if !chunk.done {
+            print!("{}", chunk.token);
+            io::stdout().flush().ok();
+        }
+    }, Some(cancel_flag.clone()));
+
+    // Handle cancellation or completion
+    let (response, was_cancelled) = match response {
+        Ok(r) => (r, false),
+        Err(e) => {
+            if e.to_string().contains("cancelled") {
+                println!("\n{}", "[Interrupted]".yellow());
+                // Return a partial response struct
+                (rigrun::local::OllamaResponse {
+                    response: String::new(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_duration_ms: 0,
+                }, true)
+            } else {
+                return Err(e);
+            }
+        }
+    };
 
     println!(); // newline after response
 
     let elapsed = start.elapsed();
-    let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 {
+    let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 && response.completion_tokens > 0 {
         response.completion_tokens as f64 / elapsed.as_secs_f64()
     } else {
         0.0
     };
 
-    println!(
-        "\n{} {} tokens ({} prompt + {} completion) in {:.1}s ({:.1} tok/s)",
-        "───".bright_black(),
-        (response.prompt_tokens + response.completion_tokens).to_string().bright_black(),
-        response.prompt_tokens.to_string().bright_black(),
-        response.completion_tokens.to_string().bright_black(),
-        elapsed.as_secs_f64(),
-        tokens_per_sec
-    );
+    if !was_cancelled {
+        println!(
+            "\n{} {} tokens ({} prompt + {} completion) in {:.1}s ({:.1} tok/s) | TTFT: {}ms",
+            "───".bright_black(),
+            (response.prompt_tokens + response.completion_tokens).to_string().bright_black(),
+            response.prompt_tokens.to_string().bright_black(),
+            response.completion_tokens.to_string().bright_black(),
+            elapsed.as_secs_f64(),
+            tokens_per_sec,
+            time_to_first_token.to_string().bright_green()
+        );
+    }
 
     Ok(())
 }
 
 pub fn interactive_chat(model: Option<String>) -> Result<()> {
+    use rigrun::cli_session::{CliSession, CliSessionConfig, CliSessionState};
+
     let model = model.unwrap_or_else(get_model_from_config);
     let client = OllamaClient::new();
 
     ensure_model_available(&client, &model)?;
 
+    // Create CLI session with DoD STIG IL5 defaults (15-minute timeout)
+    let session_config = CliSessionConfig::dod_stig_default();
+    let mut session = CliSession::new("cli-user", session_config);
+    session.acknowledge_consent(); // Consent was already shown at startup
+
     println!(
-        "\n{} Interactive chat mode | Model: {} | Type 'exit' or Ctrl+C to quit\n",
+        "\n{} Interactive chat mode | Model: {} | Type 'exit' or Ctrl+C to quit",
         "rigrun".bright_cyan().bold(),
         model.bright_white()
+    );
+    println!(
+        "{} Session timeout: {} minutes (DoD STIG IL5)\n",
+        "[i]".bright_blue(),
+        rigrun::CLI_SESSION_TIMEOUT_SECS / 60
     );
 
     let mut conversation: Vec<Message> = Vec::new();
@@ -1181,8 +1241,59 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
     let mut reader = stdin.lock();
 
     loop {
-        // Show prompt
-        print!("{} ", "rigrun>".bright_cyan().bold());
+        // Check session timeout before each prompt
+        if session.check_timeout() {
+            match session.state() {
+                CliSessionState::Expired => {
+                    let needs_reauth = session.show_expiration();
+                    if needs_reauth {
+                        // Require consent banner re-acknowledgment
+                        println!("\n{} Re-authenticating session...\n", "[!]".yellow());
+
+                        // Show consent banner again
+                        if let Err(e) = consent_banner::handle_consent_banner(false, true) {
+                            eprintln!("{}{RESET} Failed to re-authenticate: {}", RED, e);
+                            break;
+                        }
+
+                        // Create new session
+                        let session_config = CliSessionConfig::dod_stig_default();
+                        session = CliSession::new("cli-user", session_config);
+                        session.acknowledge_consent();
+
+                        println!(
+                            "\n{} Session renewed. Timeout: {} minutes\n",
+                            "[+]".green(),
+                            rigrun::CLI_SESSION_TIMEOUT_SECS / 60
+                        );
+                    }
+                }
+                CliSessionState::Warning => {
+                    session.show_warning();
+                    // Wait for user acknowledgment
+                    print!("{} Press ENTER to continue... ", "[!]".yellow());
+                    io::stdout().flush()?;
+                    let mut ack = String::new();
+                    reader.read_line(&mut ack)?;
+                    session.refresh();
+                    println!("{} Session extended.\n", "[+]".green());
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        // Show prompt with session time remaining
+        let remaining = session.time_remaining_secs();
+        let mins = remaining / 60;
+        let secs = remaining % 60;
+        let time_indicator = if remaining <= 120 {
+            format!("[{}:{:02}]", mins, secs).yellow()
+        } else {
+            format!("[{}:{:02}]", mins, secs).bright_black()
+        };
+
+        print!("{} {} ", "rigrun>".bright_cyan().bold(), time_indicator);
         io::stdout().flush()?;
 
         // Read user input
@@ -1190,11 +1301,15 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         reader.read_line(&mut input)?;
         let input = input.trim();
 
+        // Refresh session on user activity
+        session.refresh();
+
         // Check for exit
         if input.is_empty() {
             continue;
         }
         if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+            session.terminate("User requested exit");
             println!("Goodbye!");
             break;
         }
@@ -1203,31 +1318,50 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         conversation.push(Message::user(input));
 
         let start = Instant::now();
+        let mut first_token_received = false;
+        let mut time_to_first_token = 0u128;
+        let mut accumulated_response = String::new();
 
-        // Get response with streaming
+        // Show thinking indicator
+        print!("{}", "Thinking...".bright_black());
+        io::stdout().flush().ok();
+
+        // Get response with TRUE streaming (typewriter effect)
         let response = client.chat_stream(&model, conversation.clone(), |chunk| {
+            if !first_token_received {
+                first_token_received = true;
+                time_to_first_token = start.elapsed().as_millis();
+                // Clear thinking indicator
+                print!("\r{}\r", " ".repeat(12));
+                io::stdout().flush().ok();
+            }
+            accumulated_response.push_str(chunk);
             print!("{}", chunk);
             io::stdout().flush().ok();
         })?;
 
         println!(); // newline after response
 
+        // Refresh session after receiving response (user is active)
+        session.refresh();
+
         // Add assistant response to conversation
         conversation.push(Message::assistant(response.response.clone()));
 
-        // Show stats
+        // Show stats with TTFT
         let elapsed = start.elapsed();
-        let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 {
+        let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 && response.completion_tokens > 0 {
             response.completion_tokens as f64 / elapsed.as_secs_f64()
         } else {
             0.0
         };
 
         println!(
-            "{} {:.1}s | {} tok/s\n",
+            "{} {:.1}s | {} tok/s | TTFT: {}ms\n",
             "───".bright_black(),
             elapsed.as_secs_f64(),
-            format!("{:.1}", tokens_per_sec).bright_black()
+            format!("{:.1}", tokens_per_sec).bright_black(),
+            time_to_first_token.to_string().bright_green()
         );
     }
 
@@ -2217,82 +2351,181 @@ fn print_paranoid_banner() {
     println!();
 }
 
-/// Run diagnostic checks on the system.
-async fn run_doctor() -> anyhow::Result<()> {
+/// Run comprehensive diagnostic checks on the system.
+async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     use colored::Colorize;
+    use rigrun::health::{HealthChecker, Severity, auto_fix_issues};
 
-    println!("{}", "rigrun doctor".bold());
-    println!("{}", "=".repeat(40));
+    println!();
+    println!("{}", "Running diagnostics...".bold());
     println!();
 
-    let mut all_passed = true;
+    // Build health checker with options
+    let mut checker = HealthChecker::new();
+    if check_network {
+        checker = checker.with_network_check(true);
+    }
 
-    // Check 1: Ollama installation
-    print!("Checking Ollama... ");
-    match check_ollama_installed() {
-        Ok(version) => println!("{} ({})", "[OK]".green(), version),
-        Err(e) => {
-            println!("{} {}", "[FAIL]".red(), e);
-            all_passed = false;
+    // Run the comprehensive health check
+    let status = checker.run_full_check();
+
+    // Display Ollama status
+    if status.ollama_running {
+        let version = status.ollama_version.as_deref().unwrap_or("unknown");
+        println!("{} Ollama: Running (v{})", "[OK]".green(), version);
+    } else {
+        println!("{} Ollama: Not running", "[X]".red());
+        println!("   {} Start Ollama: ollama serve", "Fix:".yellow());
+    }
+
+    // Display Model status
+    if let Some(ref model) = status.model_name {
+        if status.model_loaded {
+            println!("{} Model: {} loaded", "[OK]".green(), model);
+        } else if status.model_downloaded {
+            println!("{} Model: {} available (not loaded)", "[OK]".green(), model);
+        } else {
+            println!("{} Model: {} not downloaded", "[X]".red(), model);
+            println!("   {} ollama pull {}", "Fix:".yellow(), model);
+        }
+    } else {
+        let available_models = rigrun::detect::list_ollama_models();
+        if available_models.is_empty() {
+            println!("{} Model: No models downloaded", "[!]".yellow());
+            println!("   {} ollama pull qwen2.5-coder:7b", "Fix:".yellow());
+        } else {
+            println!("{} Model: {} models available", "[OK]".green(), available_models.len());
         }
     }
 
-    // Check 2: Ollama service
-    print!("Checking Ollama service... ");
-    match check_ollama_running().await {
-        Ok(_) => println!("{}", "[OK]".green()),
-        Err(e) => {
-            println!("{} {}", "[FAIL]".red(), e);
-            all_passed = false;
+    // Display GPU status
+    if let Some(ref gpu) = status.gpu_info {
+        let vram_info = format!("{}GB VRAM", gpu.vram_gb);
+        if status.gpu_in_use {
+            println!("{} GPU: {} ({}, {})", "[OK]".green(), gpu.name, gpu.gpu_type, vram_info);
+        } else if status.gpu_detected {
+            println!("{} GPU: {} (detected but not in use)", "[!]".yellow(), gpu.name);
+        } else {
+            println!("{} GPU: {} ({})", "[OK]".green(), gpu.name, vram_info);
+        }
+    } else if !status.gpu_detected {
+        println!("{} GPU: None detected (CPU mode)", "[!]".yellow());
+        println!("   {} Install GPU drivers or run 'rigrun setup gpu'", "Fix:".yellow());
+    }
+
+    // Display VRAM usage if available
+    if let (Some(used), Some(percent)) = (status.vram_used_mb, status.vram_usage_percent) {
+        let total = status.vram_used_mb.unwrap_or(0) + status.vram_available_mb.unwrap_or(0);
+        if percent >= 95.0 {
+            println!("{} VRAM: {:.1}% used ({}/{}MB) - critically low!", "[X]".red(), percent, used, total);
+            println!("   {} Consider using a smaller model", "Fix:".yellow());
+        } else if percent >= 85.0 {
+            println!("{} VRAM: {:.1}% used ({}/{}MB)", "[!]".yellow(), percent, used, total);
+            println!("   {} Consider using a smaller model if experiencing slowdowns", "Tip:".cyan());
+        } else {
+            println!("{} VRAM: {:.1}% used ({}/{}MB)", "[OK]".green(), percent, used, total);
         }
     }
 
-    // Check 3: GPU status
-    print!("Checking GPU... ");
-    match detect_gpu() {
-        Ok(gpu_info) => {
-            if gpu_info.gpu_type == GpuType::Cpu {
-                println!("{} CPU mode - no GPU detected", "[WARN]".yellow());
-                println!("                       Run 'rigrun setup gpu' for help");
-            } else {
-                let vram_info = if gpu_info.vram_gb > 0 {
-                    format!(" ({}GB VRAM)", gpu_info.vram_gb)
-                } else {
-                    String::new()
-                };
-                println!("{} {}{}", "[OK]".green(), gpu_info.name, vram_info);
-            }
-        }
-        Err(e) => {
-            println!("{} {}", "[WARN]".yellow(), e);
-            println!("                       Run 'rigrun setup gpu' for help");
+    // Display Config status
+    if status.config_valid {
+        println!("{} Config: Valid", "[OK]".green());
+    } else {
+        println!("{} Config: Invalid", "[X]".red());
+        for issue in &status.config_issues {
+            println!("   {} {}", "Issue:".yellow(), issue);
         }
     }
 
-    // Check 4: Config validity
-    print!("Checking config... ");
-    match check_config() {
-        Ok(_) => println!("{}", "[OK]".green()),
-        Err(e) => {
-            println!("{} {}", "[WARN]".yellow(), e);
+    // Display Disk space status
+    if let Some(space) = status.disk_space_gb {
+        if space >= 10 {
+            println!("{} Disk: {}GB available", "[OK]".green(), space);
+        } else {
+            println!("{} Disk: {}GB available (low)", "[!]".yellow(), space);
+            println!("   {} Free up disk space for model storage", "Fix:".yellow());
         }
     }
 
-    // Check 5: Port availability
+    // Display Network status (if checked)
+    if let Some(available) = status.network_available {
+        if available {
+            println!("{} Network: Cloud APIs reachable", "[OK]".green());
+        } else {
+            println!("{} Network: Cloud APIs unreachable", "[!]".yellow());
+            println!("   {} Check internet connection for cloud fallback", "Note:".cyan());
+        }
+    }
+
+    // Display port availability
     print!("Checking port 8787... ");
     match check_port_available(8787) {
         Ok(_) => println!("{}", "[OK]".green()),
         Err(e) => {
-            println!("{} {}", "[WARN]".yellow(), e);
+            println!("{} {}", "[!]".yellow(), e);
+        }
+    }
+
+    // Summary
+    println!();
+    let (critical, warnings, _info) = status.issue_counts();
+
+    if critical == 0 && warnings == 0 {
+        println!("{}", "All checks passed! rigrun is ready.".green().bold());
+    } else {
+        // Show detailed issues
+        if critical > 0 || warnings > 0 {
+            println!("{}", "Issues found:".yellow().bold());
+            println!();
+
+            for issue in &status.issues {
+                let icon = match issue.severity {
+                    Severity::Critical => "[X]".red(),
+                    Severity::Warning => "[!]".yellow(),
+                    Severity::Info => "[i]".cyan(),
+                };
+                println!("{} {}: {}", icon, issue.component.bold(), issue.message);
+                println!("   {} {}", "Fix:".yellow(), issue.fix);
+                println!();
+            }
+        }
+
+        println!(
+            "Overall: {} critical, {} warning{}",
+            if critical > 0 { format!("{}", critical).red().bold() } else { format!("{}", critical).green() },
+            if warnings > 0 { format!("{}", warnings).yellow().bold() } else { format!("{}", warnings).green() },
+            if warnings == 1 { "" } else { "s" }
+        );
+
+        // Auto-fix if requested
+        if auto_fix {
+            let fixable: Vec<_> = status.fixable_issues();
+            if fixable.is_empty() {
+                println!();
+                println!("{}", "No auto-fixable issues found.".dimmed());
+            } else {
+                println!();
+                println!("{}", "Attempting to auto-fix issues...".bold());
+                println!();
+
+                let results = auto_fix_issues(&fixable);
+                for (cmd, result) in results {
+                    match result {
+                        Ok(_) => println!("{} Fixed: {}", "[OK]".green(), cmd),
+                        Err(e) => println!("{} Failed: {} - {}", "[X]".red(), cmd, e),
+                    }
+                }
+            }
+        } else if !status.fixable_issues().is_empty() {
+            println!();
+            println!("Run '{}' to auto-fix {} issue(s) where possible.",
+                "rigrun doctor --fix".cyan(),
+                status.fixable_issues().len()
+            );
         }
     }
 
     println!();
-    if all_passed {
-        println!("{}", "All checks passed! rigrun is ready.".green().bold());
-    } else {
-        println!("{}", "Some checks failed. See above for details.".yellow().bold());
-    }
 
     Ok(())
 }
@@ -2356,19 +2589,13 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
                     // Quick setup mode - minimal prompts
                     if let Err(e) = run_quick_wizard().await {
                         eprintln!("{YELLOW}[!]{RESET} Quick setup error: {}", e);
-                        // Fall back to old wizard if new one fails
-                        if let Err(e2) = firstrun::show_first_run_menu(config).await {
-                            eprintln!("{YELLOW}[!]{RESET} Fallback setup error: {}", e2);
-                        }
+                        eprintln!("{YELLOW}[!]{RESET} You can run 'rigrun setup' manually to configure.");
                     }
                 } else {
                     // Full interactive wizard
                     if let Err(e) = run_wizard().await {
                         eprintln!("{YELLOW}[!]{RESET} Wizard error: {}", e);
-                        // Fall back to old wizard if new one fails
-                        if let Err(e2) = firstrun::show_first_run_menu(config).await {
-                            eprintln!("{YELLOW}[!]{RESET} Fallback setup error: {}", e2);
-                        }
+                        eprintln!("{YELLOW}[!]{RESET} You can run 'rigrun setup' manually to configure.");
                     }
                 }
 
@@ -2519,7 +2746,10 @@ fn main() -> Result<()> {
 
     // Determine if we need async runtime or can run synchronously
     let async_command = match &cli.command {
-        None => Some(AsyncCommand::StartServer),
+        None => Some(AsyncCommand::StartServer {
+            no_wizard: cli.no_wizard,
+            quick_setup: cli.quick_setup,
+        }),
         Some(Commands::Ask { question, model, file }) => Some(AsyncCommand::Ask {
             question: question.clone(),
             model: model.clone(),

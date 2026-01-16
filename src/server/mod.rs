@@ -11,6 +11,7 @@
 //! - `GET /health` - Health check
 //! - `GET /v1/models` - List available models
 //! - `POST /v1/chat/completions` - Chat completion (OpenAI-compatible)
+//! - `POST /v1/chat/completions/stream` - Streaming chat (SSE) - TRUE streaming!
 //! - `GET /stats` - Usage statistics (includes semantic cache metrics)
 //! - `GET /cache/stats` - Exact-match cache statistics
 //! - `GET /cache/semantic` - Semantic cache statistics
