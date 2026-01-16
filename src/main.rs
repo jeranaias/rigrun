@@ -1789,9 +1789,9 @@ fn handle_gpu_setup() -> Result<()> {
             if let Some(ref arch) = status.amd_architecture {
                 println!("{BLUE}[i]{RESET} AMD Architecture: {}", arch);
 
-                // Special warning for RDNA 4
+                // Special note for RDNA 4
                 if *arch == AmdArchitecture::Rdna4 {
-                    println!("    {YELLOW}[!]{RESET} RDNA 4 requires ollama-for-amd fork");
+                    println!("    {GREEN}[i]{RESET} RDNA 4 works with Vulkan backend (set OLLAMA_VULKAN=1)");
                 }
             }
 

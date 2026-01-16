@@ -278,9 +278,9 @@ For RX 9070/9070 XT:
 export HSA_OVERRIDE_GFX_VERSION=11.0.0
 echo 'export HSA_OVERRIDE_GFX_VERSION=11.0.0' >> ~/.bashrc
 
-# May need ollama-for-amd fork
-# Run rigrun gpu-setup for specific instructions
-rigrun gpu-setup
+# For RDNA 4 (RX 9000 series), use Vulkan backend instead:
+export OLLAMA_VULKAN=1
+ollama serve
 ```
 
 ### Apple Silicon (M1/M2/M3)

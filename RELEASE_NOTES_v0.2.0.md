@@ -275,7 +275,7 @@ See [docs/](https://github.com/jeranaias/rigrun/tree/main/docs) for full documen
 
 ## Known Issues
 
-- **AMD RDNA 4**: Still requires custom Ollama build (ollama-for-amd fork)
+- **AMD RDNA 4**: Works with Vulkan backend (set OLLAMA_VULKAN=1)
 - **Streaming**: Not yet implemented for chat completions (planned for v0.3.0)
 - **Docker GPU**: NVIDIA GPU passthrough requires nvidia-docker runtime
 - **Windows Docker**: GPU passthrough not supported on Windows (WSL2 limitation)

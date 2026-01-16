@@ -114,7 +114,7 @@ Out-of-the-box support for:
 
 ### Known Issues
 
-- **AMD RDNA 4**: Requires custom Ollama build (ollama-for-amd fork)
+- **AMD RDNA 4**: Works with Vulkan backend (set OLLAMA_VULKAN=1)
 - **Streaming**: Not yet implemented for chat completions
 - **Authentication**: No built-in authentication (intended for local use)
 - **Rate Limiting**: No built-in rate limiting
