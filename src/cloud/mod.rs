@@ -24,12 +24,16 @@
 //! ```
 
 use anyhow::{anyhow, Context, Result};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
 // Re-export Message from types for API compatibility
 pub use crate::types::Message;
+use crate::types::{StreamChunk, PartialResponse, InterruptReason};
 
 /// Default OpenRouter API endpoint.
 const DEFAULT_OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
@@ -157,7 +161,8 @@ struct ChatCompletionResponse {
 
 #[derive(Debug, Deserialize)]
 struct ChatChoice {
-    message: ChatMessage,
+    message: Option<ChatMessage>,
+    delta: Option<ChatDelta>,
     #[allow(dead_code)]
     finish_reason: Option<String>,
 }
@@ -165,6 +170,28 @@ struct ChatChoice {
 #[derive(Debug, Deserialize)]
 struct ChatMessage {
     content: Option<String>,
+}
+
+/// Delta for streaming responses (SSE format).
+#[derive(Debug, Deserialize)]
+struct ChatDelta {
+    content: Option<String>,
+}
+
+/// Streaming chunk from OpenRouter SSE.
+#[derive(Debug, Deserialize)]
+struct StreamingChunk {
+    #[allow(dead_code)]
+    id: Option<String>,
+    choices: Vec<StreamingChoice>,
+    usage: Option<Usage>,
+    model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamingChoice {
+    delta: Option<ChatDelta>,
+    finish_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -452,7 +479,8 @@ impl OpenRouterClient {
 
             let response_text = chat_response.choices
                 .first()
-                .and_then(|c| c.message.content.clone())
+                .and_then(|c| c.message.as_ref())
+                .and_then(|m| m.content.clone())
                 .unwrap_or_default();
 
             let (prompt_tokens, completion_tokens) = chat_response.usage
@@ -477,6 +505,239 @@ impl OpenRouterClient {
     /// Get the base URL.
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+
+    /// Perform a streaming chat completion.
+    ///
+    /// Streams tokens as they arrive from OpenRouter's API using Server-Sent Events.
+    /// Supports cancellation via an atomic flag.
+    ///
+    /// # Arguments
+    ///
+    /// * `model` - The model to use for chat
+    /// * `messages` - A vector of chat messages
+    /// * `chunk_callback` - An async function called with each StreamChunk
+    /// * `cancel_flag` - Optional atomic flag to signal cancellation
+    ///
+    /// # Returns
+    ///
+    /// `Ok(OpenRouterResponse)` on success with full response and token counts.
+    pub async fn chat_stream<F>(
+        &self,
+        model: &str,
+        messages: Vec<Message>,
+        mut chunk_callback: F,
+        cancel_flag: Option<Arc<AtomicBool>>,
+    ) -> Result<OpenRouterResponse>
+    where
+        F: FnMut(StreamChunk) + Send,
+    {
+        let api_key = self.api_key.as_ref()
+            .ok_or_else(|| anyhow!(OpenRouterError::NotConfigured(
+                "API key is not set.".to_string()
+            )))?;
+
+        let url = format!("{}/chat/completions", self.base_url);
+        let body = serde_json::json!({
+            "model": model,
+            "messages": messages,
+            "stream": true,  // Enable streaming
+        });
+
+        let mut request = self.client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .header("Accept", "text/event-stream")  // Request SSE
+            .header("User-Agent", "rigrun/0.2.0");
+
+        // Add optional headers
+        if let Some(ref site_url) = self.site_url {
+            request = request.header("HTTP-Referer", site_url);
+        }
+        if let Some(ref site_name) = self.site_name {
+            request = request.header("X-Title", site_name);
+        }
+
+        let response = request
+            .json(&body)
+            .timeout(self.timeout)
+            .send()
+            .await
+            .map_err(|e| {
+                if e.is_timeout() {
+                    anyhow!(OpenRouterError::NetworkError("Request timed out.".to_string()))
+                } else if e.is_connect() {
+                    anyhow!(OpenRouterError::NetworkError(format!(
+                        "Failed to connect to OpenRouter: {}",
+                        e
+                    )))
+                } else {
+                    anyhow!(OpenRouterError::NetworkError(format!("Network error: {}", e)))
+                }
+            })?;
+
+        let status = response.status();
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+
+            if status.as_u16() == 401 {
+                return Err(anyhow!(OpenRouterError::AuthError(
+                    "Invalid API key.".to_string()
+                )));
+            }
+            if status.as_u16() == 402 {
+                return Err(anyhow!(OpenRouterError::ApiError(
+                    "Insufficient credits. Add funds at https://openrouter.ai/credits".to_string()
+                )));
+            }
+            if status.as_u16() == 404 || error_text.contains("not found") {
+                return Err(anyhow!(OpenRouterError::ModelNotFound(model.to_string())));
+            }
+            if status.as_u16() == 429 {
+                return Err(anyhow!(OpenRouterError::RateLimited("Too many requests.".to_string())));
+            }
+
+            return Err(anyhow!(OpenRouterError::ApiError(format!(
+                "API error: HTTP {} - {}",
+                status, error_text
+            ))));
+        }
+
+        // Stream the response using byte stream
+        let mut full_response = String::new();
+        let mut prompt_tokens = 0u32;
+        let mut completion_tokens = 0u32;
+        let mut token_count = 0u32;
+        let mut used_model = model.to_string();
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = String::new();
+
+        while let Some(chunk_result) = stream.next().await {
+            // Check for cancellation
+            if let Some(ref flag) = cancel_flag {
+                if flag.load(Ordering::Relaxed) {
+                    chunk_callback(StreamChunk::done_with_count(token_count));
+                    let partial = PartialResponse {
+                        text: full_response.clone(),
+                        tokens_received: token_count,
+                        reason: InterruptReason::UserCancel,
+                    };
+                    return Err(anyhow::anyhow!("Stream cancelled by user")
+                        .context(format!("Partial response: {} tokens", partial.tokens_received)));
+                }
+            }
+
+            let chunk = match chunk_result {
+                Ok(c) => c,
+                Err(e) => {
+                    if full_response.is_empty() {
+                        return Err(anyhow!(OpenRouterError::NetworkError(format!(
+                            "Connection error during streaming: {}",
+                            e
+                        ))));
+                    }
+                    // Connection dropped mid-stream - return what we have
+                    chunk_callback(StreamChunk::done_with_count(token_count));
+                    break;
+                }
+            };
+
+            // Append bytes to buffer and process complete lines
+            buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+            // Process complete SSE events (lines ending with \n\n or \n)
+            while let Some(pos) = buffer.find('\n') {
+                let line = buffer[..pos].to_string();
+                buffer = buffer[pos + 1..].to_string();
+
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                // SSE format: "data: {json}" or "data: [DONE]"
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if data == "[DONE]" {
+                        chunk_callback(StreamChunk::done_with_count(completion_tokens.max(token_count)));
+                        continue;
+                    }
+
+                    // Parse the streaming chunk
+                    if let Ok(sse_chunk) = serde_json::from_str::<StreamingChunk>(data) {
+                        if let Some(model_name) = sse_chunk.model {
+                            used_model = model_name;
+                        }
+
+                        if let Some(usage) = sse_chunk.usage {
+                            prompt_tokens = usage.prompt_tokens;
+                            completion_tokens = usage.completion_tokens;
+                        }
+
+                        for choice in sse_chunk.choices {
+                            if let Some(delta) = choice.delta {
+                                if let Some(content) = delta.content {
+                                    if !content.is_empty() {
+                                        token_count += 1;
+                                        // Stream token IMMEDIATELY
+                                        chunk_callback(StreamChunk {
+                                            token: content.clone(),
+                                            done: false,
+                                            tokens_so_far: Some(token_count),
+                                        });
+                                        full_response.push_str(&content);
+                                    }
+                                }
+                            }
+
+                            if choice.finish_reason.is_some() {
+                                chunk_callback(StreamChunk::done_with_count(completion_tokens.max(token_count)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(OpenRouterResponse {
+            response: full_response,
+            prompt_tokens,
+            completion_tokens: completion_tokens.max(token_count),
+            model: used_model,
+            cost_usd: None,
+        })
+    }
+
+    /// Streaming chat using tokio channels.
+    ///
+    /// Returns a receiver for stream chunks and a join handle for the completion.
+    pub fn chat_stream_channel(
+        &self,
+        model: &str,
+        messages: Vec<Message>,
+    ) -> (
+        tokio::sync::mpsc::Receiver<StreamChunk>,
+        tokio::task::JoinHandle<Result<OpenRouterResponse>>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::channel::<StreamChunk>(64);
+        let client = self.clone();
+        let model = model.to_string();
+
+        let handle = tokio::spawn(async move {
+            client.chat_stream(
+                &model,
+                messages,
+                |chunk| {
+                    // Try to send, ignore if receiver dropped
+                    let _ = tx.try_send(chunk);
+                },
+                None,
+            ).await
+        });
+
+        (rx, handle)
     }
 }
 

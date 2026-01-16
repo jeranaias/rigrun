@@ -7,6 +7,98 @@
 
 use serde::{Deserialize, Serialize};
 
+// ============================================================================
+// STREAMING CONFIGURATION
+// ============================================================================
+
+/// Configuration for streaming responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingConfig {
+    /// Whether streaming is enabled.
+    pub enabled: bool,
+    /// Number of tokens to buffer before sending (1 = immediate).
+    pub buffer_size: usize,
+    /// Timeout for first token in milliseconds (default: 30000).
+    pub first_token_timeout_ms: u64,
+    /// Timeout between tokens in milliseconds (default: 5000).
+    pub token_timeout_ms: u64,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            buffer_size: 1,  // Immediate token delivery
+            first_token_timeout_ms: 30000,  // 30 seconds for first token
+            token_timeout_ms: 5000,  // 5 seconds between tokens
+        }
+    }
+}
+
+/// A single token/chunk from a streaming response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamChunk {
+    /// The token text.
+    pub token: String,
+    /// Whether this is the final chunk.
+    pub done: bool,
+    /// Token count so far (if available).
+    pub tokens_so_far: Option<u32>,
+}
+
+impl StreamChunk {
+    /// Create a new token chunk.
+    pub fn token(text: impl Into<String>) -> Self {
+        Self {
+            token: text.into(),
+            done: false,
+            tokens_so_far: None,
+        }
+    }
+
+    /// Create a final/done chunk.
+    pub fn done() -> Self {
+        Self {
+            token: String::new(),
+            done: true,
+            tokens_so_far: None,
+        }
+    }
+
+    /// Create a done chunk with token count.
+    pub fn done_with_count(tokens: u32) -> Self {
+        Self {
+            token: String::new(),
+            done: true,
+            tokens_so_far: Some(tokens),
+        }
+    }
+}
+
+/// Result of a streaming operation that was interrupted.
+#[derive(Debug, Clone)]
+pub struct PartialResponse {
+    /// The partial response text accumulated so far.
+    pub text: String,
+    /// Number of tokens received before interruption.
+    pub tokens_received: u32,
+    /// Reason for interruption.
+    pub reason: InterruptReason,
+}
+
+/// Reason why a streaming response was interrupted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterruptReason {
+    /// User pressed Ctrl+C or cancelled.
+    UserCancel,
+    /// Connection was dropped.
+    ConnectionDropped,
+    /// Timeout waiting for next token.
+    Timeout,
+    /// Model returned an error mid-stream.
+    ModelError,
+}
+
 /// A chat message with role and content.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
