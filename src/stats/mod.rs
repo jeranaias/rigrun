@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! Cost Tracking and Statistics Module for Rigrun
 //!
 //! Tracks what users SAVE by running locally instead of paying for cloud APIs.

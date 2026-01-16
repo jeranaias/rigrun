@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! API server
 //!
 //! Provides an HTTP API for LLM inference requests.
@@ -638,7 +641,8 @@ struct ChatCompletionRequest {
 const MAX_QUERY_LENGTH: usize = 100_000; // 100KB
 const MAX_MESSAGE_COUNT: usize = 100;
 // Default timeout for Ollama calls (in seconds)
-const OLLAMA_TIMEOUT_SECS: u64 = 120;
+// Short timeout to quickly fall back to cloud if local is slow
+const OLLAMA_TIMEOUT_SECS: u64 = 15;
 // Maximum request body size (1MB)
 const MAX_BODY_SIZE: usize = 1024 * 1024;
 
@@ -923,17 +927,17 @@ async fn completions_handler(
     // (lock was already released after cache lookup)
 
     // Determine which tier to use based on the requested model
+    // rigrun uses auto-routing for maximum cost efficiency
     let tier = match request.model.as_str() {
         "auto" => {
             // Use router to determine tier based on query complexity
+            // Simple queries → local, complex → cloud (OpenRouter auto-routes)
             route_query(cache_key, None)
         }
-        "local" => Tier::Local,
-        "cache" => Tier::Cache,
-        "cloud" => Tier::Cloud,
-        "haiku" => Tier::Haiku,
-        "sonnet" => Tier::Sonnet,
-        "opus" => Tier::Opus,
+        "local" => Tier::Local,  // Force local Ollama
+        "cache" => Tier::Cache,  // Cache-only (will fall back to local on miss)
+        // All cloud requests use OpenRouter auto-routing for best cost/performance
+        "cloud" | "haiku" | "sonnet" | "opus" | "gpt4" | "gpt4o" => Tier::Cloud,
         _ => Tier::Local, // Default to local for unknown models
     };
 
@@ -951,34 +955,64 @@ async fn completions_handler(
             // Call Ollama for inference with timeout to prevent hanging
             let ollama_future = state
                 .ollama_client
-                .chat_async(&state.local_model, messages);
+                .chat_async(&state.local_model, messages.clone());
 
-            let ollama_response = tokio::time::timeout(
+            let ollama_result = tokio::time::timeout(
                 std::time::Duration::from_secs(OLLAMA_TIMEOUT_SECS),
                 ollama_future,
             )
-            .await
-            .map_err(|_| {
-                tracing::error!("Ollama request timed out after {}s", OLLAMA_TIMEOUT_SECS);
-                (
-                    StatusCode::GATEWAY_TIMEOUT,
-                    format!("Ollama request timed out after {} seconds", OLLAMA_TIMEOUT_SECS),
-                )
-            })?
-            .map_err(|e| {
-                tracing::error!("Ollama error: {}", redact_secrets(&e.to_string()));
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Ollama error: {}", redact_secrets(&e.to_string())),
-                )
-            })?;
+            .await;
 
-            (
-                ollama_response.response,
-                ollama_response.prompt_tokens,
-                ollama_response.completion_tokens,
-                Tier::Local,
-            )
+            // Handle result: success, or fallback to cloud on failure/timeout
+            let local_failed = match &ollama_result {
+                Ok(Ok(_)) => false,
+                _ => true,
+            };
+
+            if !local_failed {
+                // Local succeeded
+                let ollama_response = ollama_result.unwrap().unwrap();
+                (
+                    ollama_response.response,
+                    ollama_response.prompt_tokens,
+                    ollama_response.completion_tokens,
+                    Tier::Local,
+                )
+            } else if state.paranoid_mode {
+                // Local failed but paranoid mode is on - can't fall back to cloud
+                let err_msg = match &ollama_result {
+                    Err(_) => format!("Ollama request timed out after {} seconds (cloud fallback blocked by paranoid mode)", OLLAMA_TIMEOUT_SECS),
+                    Ok(Err(e)) => format!("Ollama error: {} (cloud fallback blocked by paranoid mode)", redact_secrets(&e.to_string())),
+                    _ => unreachable!(),
+                };
+                tracing::error!("{}", err_msg);
+                return Err((StatusCode::GATEWAY_TIMEOUT, err_msg));
+            } else {
+                // Local failed or timed out - fall back to cloud!
+                tracing::warn!("Local inference failed/timed out, falling back to cloud (OpenRouter auto)");
+
+                // Use OpenRouter auto-router for automatic model selection
+                let model = "openrouter/auto";
+
+                let openrouter_response = state
+                    .openrouter_client
+                    .chat(model, messages.clone())
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("OpenRouter fallback error: {}", redact_secrets(&e.to_string()));
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Both local and cloud failed. Cloud error: {}", redact_secrets(&e.to_string())),
+                        )
+                    })?;
+
+                (
+                    openrouter_response.response,
+                    openrouter_response.prompt_tokens,
+                    openrouter_response.completion_tokens,
+                    Tier::Cloud,
+                )
+            }
         }
         Tier::Cloud => {
             // PARANOID MODE: Block cloud requests
@@ -1017,48 +1051,8 @@ async fn completions_handler(
                 Tier::Cloud,
             )
         }
-        Tier::Haiku | Tier::Sonnet | Tier::Opus => {
-            // PARANOID MODE: Block cloud requests
-            if state.paranoid_mode {
-                tracing::warn!("PARANOID MODE: Blocking {:?} cloud request", tier);
-                audit::audit_log_blocked(tier, cache_key);
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    format!("PARANOID MODE: Cloud requests ({:?}) are blocked. Your data stays local.", tier),
-                ));
-            }
-
-            // Map tier to OpenRouter model name (explicit model selection)
-            let model = match tier {
-                Tier::Haiku => "anthropic/claude-3-haiku",
-                Tier::Sonnet => "anthropic/claude-3.5-sonnet",
-                Tier::Opus => "anthropic/claude-3-opus",
-                _ => unreachable!(),
-            };
-
-            // Messages are already in the correct format (types::Message)
-            let cloud_messages = request.messages.clone();
-
-            // Call OpenRouter for cloud inference
-            let openrouter_response = state
-                .openrouter_client
-                .chat(model, cloud_messages)
-                .await
-                .map_err(|e| {
-                    tracing::error!("OpenRouter error: {}", redact_secrets(&e.to_string()));
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("OpenRouter error: {}", redact_secrets(&e.to_string())),
-                    )
-                })?;
-
-            (
-                openrouter_response.response,
-                openrouter_response.prompt_tokens,
-                openrouter_response.completion_tokens,
-                tier,
-            )
-        }
+        // All other tiers (Haiku, Sonnet, Opus, Gpt4o) are legacy - not used with auto-routing
+        _ => unreachable!("All cloud requests now use Tier::Cloud with OpenRouter auto-routing")
     };
 
     // Store response in cache for future hits

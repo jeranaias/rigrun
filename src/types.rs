@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! Canonical types used across rigrun.
 //!
 //! This module provides unified type definitions to avoid duplication.
@@ -33,22 +36,23 @@ impl Message {
 }
 
 /// Model tier for routing decisions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Ordered by cost/capability: Cache < Local < Haiku < Cloud < Gpt4o < Sonnet < Opus
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Tier {
     /// Cached response (free, instant)
     Cache,
     /// Local Ollama model
     Local,
-    /// Cloud model (generic)
-    Cloud,
     /// Claude Haiku (fast, cheap)
     Haiku,
+    /// Cloud model (generic)
+    Cloud,
+    /// OpenAI GPT-4o
+    Gpt4o,
     /// Claude Sonnet (balanced)
     Sonnet,
     /// Claude Opus (powerful)
     Opus,
-    /// OpenAI GPT-4o
-    Gpt4o,
 }
 
 impl Tier {

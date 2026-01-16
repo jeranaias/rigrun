@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 use anyhow::Result;
 use inquire::{Select, Text};
 use super::{Config, save_config, interactive_chat, handle_cli_examples};

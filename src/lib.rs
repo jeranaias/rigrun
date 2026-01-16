@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! rigrun - Local-first LLM router library
 //!
 //! Your GPU first, cloud when needed.

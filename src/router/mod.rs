@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! Query Router - Intelligent routing for RAG queries.
 //!
 //! Routes queries to the appropriate tier based on complexity:
@@ -245,6 +248,10 @@ impl QueryType {
 ///
 /// Analyzes the query text to determine how complex the response needs to be.
 /// This drives tier selection for cost optimization.
+///
+/// NOTE: Threshold is set LOW to favor cloud routing for better responses.
+/// Local models are only used for very simple queries (< 10 words).
+/// Cloud uses OpenRouter auto-router which picks the cheapest model automatically.
 pub fn classify_query(query: &str) -> QueryComplexity {
     let q = query.to_lowercase();
     let word_count = query.split_whitespace().count();
@@ -256,25 +263,35 @@ pub fn classify_query(query: &str) -> QueryComplexity {
         return QueryComplexity::Expert;
     }
 
-    // Complex indicators (analysis, implementation, long queries)
+    // Complex indicators (analysis, implementation, code review, any substantial query)
+    // LOWERED THRESHOLD: 15+ words or any code-related work goes to cloud
     if q.contains("explain") || q.contains("compare") ||
        q.contains("analyze") || q.contains("implement") ||
-       q.contains("refactor") || word_count > 50 {
+       q.contains("refactor") || q.contains("review") ||
+       q.contains("code") || q.contains("function") ||
+       q.contains("bug") || q.contains("error") ||
+       word_count > 15 {
         return QueryComplexity::Complex;
     }
 
     // Moderate indicators (how/why questions, debugging)
+    // LOWERED THRESHOLD: 10+ words goes to cloud
     if q.contains("how") || q.contains("why") ||
        q.contains("debug") || q.contains("fix") ||
-       word_count > 20 {
+       word_count > 10 {
         return QueryComplexity::Moderate;
     }
 
-    // Simple indicators (basic lookups, short queries)
+    // Simple indicators - ONLY very basic lookups stay local
+    // Anything with more than 10 words goes to cloud
     if q.contains("what is") || q.contains("where is") ||
-       q.contains("find") || q.contains("list") ||
-       word_count > 5 {
+       q.contains("find") || q.contains("list") {
         return QueryComplexity::Simple;
+    }
+
+    // Default: anything with 5+ words goes to moderate (cloud)
+    if word_count >= 5 {
+        return QueryComplexity::Moderate;
     }
 
     QueryComplexity::Trivial
@@ -323,7 +340,7 @@ pub fn route_query_detailed(query: &str, max_tier: Option<Tier>) -> RoutingDecis
     };
 
     // Estimate cost (assume ~500 input tokens, ~1000 output tokens for typical query)
-    let estimated_cost = tier.calculate_cost(500, 1000);
+    let estimated_cost = tier.calculate_cost_cents(500, 1000);
 
     let reason = format!(
         "Query classified as {:?} complexity ({:?} type) -> {} tier",
@@ -435,14 +452,20 @@ mod tests {
 
     #[test]
     fn test_complexity_classification() {
-        // Trivial queries
+        // Trivial queries (< 5 words, no keywords)
         assert_eq!(classify_query("hi"), QueryComplexity::Trivial);
+        assert_eq!(classify_query("hello world"), QueryComplexity::Trivial);
 
-        // Simple queries
+        // Simple queries (basic lookups only)
         assert_eq!(classify_query("what is rust"), QueryComplexity::Simple);
 
-        // Moderate queries
-        assert_eq!(classify_query("how do I fix this bug"), QueryComplexity::Moderate);
+        // Moderate queries (how/why or 5+ words)
+        assert_eq!(classify_query("how do I fix this bug"), QueryComplexity::Complex); // "bug" keyword
+        assert_eq!(classify_query("tell me about this topic here"), QueryComplexity::Moderate); // 6 words
+
+        // Complex queries (code-related keywords)
+        assert_eq!(classify_query("review this code"), QueryComplexity::Complex);
+        assert_eq!(classify_query("explain the function"), QueryComplexity::Complex);
 
         // Expert queries
         assert_eq!(
@@ -461,15 +484,19 @@ mod tests {
 
     #[test]
     fn test_routing() {
-        // Trivial queries route to Cache tier
+        // Trivial queries route to Cache tier (< 5 words, no keywords)
         assert_eq!(route_query("hello", None), Tier::Cache);
-        // Simple queries route to Local
+        assert_eq!(route_query("hi there", None), Tier::Cache);
+
+        // Simple queries route to Local (basic lookups only)
         assert_eq!(route_query("what is rust", None), Tier::Local);
-        // Moderate queries route to Cloud (OpenRouter auto)
-        assert_eq!(route_query("how do I fix this error", None), Tier::Cloud);
-        // Complex queries route to Cloud (OpenRouter auto)
+
+        // Moderate+ queries route to Cloud (OpenRouter auto) - lowered threshold!
+        // 5+ words or code-related keywords go to cloud
+        assert_eq!(route_query("how do I fix this error", None), Tier::Cloud); // "error" keyword
         assert_eq!(route_query("explain how async runtime works", None), Tier::Cloud);
-        // Expert queries route to Cloud (OpenRouter auto)
         assert_eq!(route_query("should I use microservices", None), Tier::Cloud);
+        assert_eq!(route_query("review this code please", None), Tier::Cloud); // "review" + "code"
+        assert_eq!(route_query("tell me about this topic here now", None), Tier::Cloud); // 7 words
     }
 }
