@@ -862,8 +862,8 @@ pub fn recommend_models_all(vram_gb: u32) -> Vec<ModelRecommendation> {
             ModelRecommendation::new("deepseek-coder-v2:lite", "Good alternative", false),
         ],
         10..=17 => vec![
-            ModelRecommendation::new("qwen2.5-coder:14b", "Best performance per VRAM", true),
-            ModelRecommendation::new("codestral:22b", "Best for autocomplete (FIM)", false),
+            ModelRecommendation::new("qwen2.5-coder:14b", "Fastest (13s on 16GB GPU), excellent quality", true),
+            ModelRecommendation::new("codestral:22b", "22B sweet spot for code (36s), fits in 16GB", false),
             ModelRecommendation::new("deepseek-coder-v2:16b", "Strong debugging partner", false),
         ],
         18..=26 => vec![
@@ -1764,8 +1764,8 @@ pub struct GpuStatusReport {
 /// Represents why a model might be running on CPU when VRAM is sufficient.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CpuFallbackCause {
-    /// AMD GPU needs ollama-for-amd fork (RDNA4, etc.)
-    AmdNeedsCustomOllama { gfx_version: String },
+    /// AMD RDNA 4 GPU needs Vulkan backend (OLLAMA_VULKAN=1)
+    AmdNeedsVulkan { gfx_version: String },
     /// ROCm/HIP not installed for AMD
     AmdMissingRocm,
     /// HSA_OVERRIDE_GFX_VERSION might help
@@ -1781,8 +1781,8 @@ pub enum CpuFallbackCause {
 impl std::fmt::Display for CpuFallbackCause {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CpuFallbackCause::AmdNeedsCustomOllama { gfx_version } => {
-                write!(f, "AMD GPU ({}) requires ollama-for-amd fork", gfx_version)
+            CpuFallbackCause::AmdNeedsVulkan { gfx_version } => {
+                write!(f, "AMD RDNA 4 GPU ({}) needs Vulkan backend (set OLLAMA_VULKAN=1)", gfx_version)
             }
             CpuFallbackCause::AmdMissingRocm => {
                 write!(f, "ROCm/HIP runtime not installed for AMD GPU")
@@ -2152,30 +2152,37 @@ fn get_nvidia_setup_guidance(gpu_info: &GpuInfo) -> Option<GpuSetupGuidance> {
 fn get_amd_setup_guidance(gpu_info: &GpuInfo) -> Option<GpuSetupGuidance> {
     let arch = detect_amd_architecture(&gpu_info.name);
 
-    // RDNA 4 (RX 9070 series) - needs special handling
+    // RDNA 4 (RX 9070 series) - use Vulkan backend (works great!)
     if arch == AmdArchitecture::Rdna4 {
         return Some(GpuSetupGuidance {
-            issue: format!("{} (RDNA 4) detected - requires ollama-for-amd fork for GPU support", gpu_info.name),
-            solution: "RDNA 4 GPUs are not yet supported by official Ollama. Use the community ollama-for-amd fork.".to_string(),
+            issue: format!("{} (RDNA 4) detected - use Vulkan backend for GPU acceleration", gpu_info.name),
+            solution: "RDNA 4 GPUs work with Ollama's Vulkan backend. Set OLLAMA_VULKAN=1 before starting Ollama.".to_string(),
             commands: if cfg!(target_os = "windows") {
                 vec![
-                    "# Install ollama-for-amd from: https://github.com/likelovewant/ollama-for-amd".to_string(),
-                    "# Download the Windows release and extract to a folder".to_string(),
-                    "# Run: set HSA_OVERRIDE_GFX_VERSION=11.0.0".to_string(),
-                    "# Then run: ollama serve".to_string(),
+                    "# Option 1: Set environment variable for current session".to_string(),
+                    "set OLLAMA_VULKAN=1".to_string(),
+                    "ollama serve".to_string(),
+                    "".to_string(),
+                    "# Option 2: Set permanently (run as Administrator)".to_string(),
+                    "setx OLLAMA_VULKAN 1 /M".to_string(),
+                    "# Then restart Ollama".to_string(),
+                    "".to_string(),
+                    "# Performance on RX 9070 XT (16GB): 14B model ~13s, 22B model ~36s".to_string(),
                 ]
             } else {
                 vec![
-                    "# Clone and build ollama-for-amd:".to_string(),
-                    "git clone https://github.com/likelovewant/ollama-for-amd".to_string(),
-                    "cd ollama-for-amd && go generate ./... && go build .".to_string(),
-                    "export HSA_OVERRIDE_GFX_VERSION=11.0.0".to_string(),
-                    "./ollama serve".to_string(),
+                    "# Set environment variable before starting Ollama:".to_string(),
+                    "export OLLAMA_VULKAN=1".to_string(),
+                    "ollama serve".to_string(),
+                    "".to_string(),
+                    "# Or add to your shell profile (~/.bashrc or ~/.zshrc):".to_string(),
+                    "echo 'export OLLAMA_VULKAN=1' >> ~/.bashrc".to_string(),
+                    "".to_string(),
+                    "# Performance on RX 9070 XT (16GB): 14B model ~13s, 22B model ~36s".to_string(),
                 ]
             },
             links: vec![
-                "https://github.com/likelovewant/ollama-for-amd".to_string(),
-                "https://github.com/ollama/ollama/issues/5678".to_string(),
+                "https://github.com/ollama/ollama/blob/main/docs/gpu.md".to_string(),
             ],
         });
     }
@@ -2406,7 +2413,7 @@ pub fn get_gpu_status_report() -> GpuStatusReport {
 /// Detects the AMD GPU GFX version (e.g., gfx1100, gfx1200) for the given GPU.
 ///
 /// This is used to determine if the GPU needs special handling like HSA override
-/// or the ollama-for-amd fork.
+/// or Vulkan backend (for RDNA 4).
 fn detect_amd_gfx_version(gpu_info: &GpuInfo) -> Option<String> {
     // Infer GFX version from GPU name using architecture detection
     let arch = detect_amd_architecture(&gpu_info.name);
@@ -2472,7 +2479,7 @@ fn check_hsa_override_set() -> bool {
 /// 3. Determines GPU type (AMD vs NVIDIA) and diagnoses accordingly
 ///
 /// For AMD GPUs:
-/// - Checks if gfx1200 (RDNA4) which needs ollama-for-amd fork
+/// - Checks if gfx1200 (RDNA4) which needs Vulkan backend (OLLAMA_VULKAN=1)
 /// - Checks if HSA_OVERRIDE_GFX_VERSION is set
 /// - Checks if ROCm folder exists
 ///
@@ -2569,15 +2576,16 @@ fn diagnose_amd_cpu_fallback_cause(gpu_info: &GpuInfo) -> (CpuFallbackCause, Vec
     let gfx_version = detect_amd_gfx_version(gpu_info).unwrap_or_else(|| "unknown".to_string());
     let arch = detect_amd_architecture(&gpu_info.name);
 
-    // Check for RDNA 4 (gfx1200) which needs special Ollama fork
+    // Check for RDNA 4 (gfx1200) which needs Vulkan backend
     if arch == AmdArchitecture::Rdna4 || gfx_version.starts_with("gfx12") {
         return (
-            CpuFallbackCause::AmdNeedsCustomOllama { gfx_version: gfx_version.clone() },
+            CpuFallbackCause::AmdNeedsVulkan { gfx_version: gfx_version.clone() },
             vec![
-                format!("Your {} is RDNA 4 ({})", gpu_info.name, gfx_version),
-                "RDNA 4 requires the 'ollama-for-amd' fork from GitHub".to_string(),
-                "Download from: https://github.com/likelovewant/ollama-for-amd".to_string(),
-                "After installing, restart Ollama and try again".to_string(),
+                format!("Your {} is RDNA 4 ({}) - use Vulkan backend!", gpu_info.name, gfx_version),
+                "Set OLLAMA_VULKAN=1 before starting Ollama:".to_string(),
+                "  Windows: set OLLAMA_VULKAN=1 && ollama serve".to_string(),
+                "  Linux:   export OLLAMA_VULKAN=1 && ollama serve".to_string(),
+                "Performance: 14B model ~13s, 22B model ~36s on RX 9070 XT".to_string(),
             ],
         );
     }
@@ -3031,7 +3039,7 @@ mod tests {
     #[test]
     fn test_cpu_fallback_cause_display() {
         // Test display formatting for all CpuFallbackCause variants
-        assert!(format!("{}", CpuFallbackCause::AmdNeedsCustomOllama {
+        assert!(format!("{}", CpuFallbackCause::AmdNeedsVulkan {
             gfx_version: "gfx1200".to_string()
         }).contains("gfx1200"));
 
@@ -3134,19 +3142,19 @@ mod tests {
         };
         let (cause, steps) = diagnose_amd_cpu_fallback_cause(&gpu);
 
-        // RDNA 4 should suggest the ollama-for-amd fork
+        // RDNA 4 should suggest Vulkan backend
         match cause {
-            CpuFallbackCause::AmdNeedsCustomOllama { gfx_version } => {
+            CpuFallbackCause::AmdNeedsVulkan { gfx_version } => {
                 assert!(gfx_version.starts_with("gfx12"));
             }
             // NOTE: This panic is acceptable - it's in test code, not production
-            _ => panic!("Expected AmdNeedsCustomOllama for RDNA 4 GPU"),
+            _ => panic!("Expected AmdNeedsVulkan for RDNA 4 GPU"),
         }
 
         // Should have fix steps
         assert!(!steps.is_empty());
-        // Should mention ollama-for-amd
-        assert!(steps.iter().any(|s| s.contains("ollama-for-amd")));
+        // Should mention Vulkan
+        assert!(steps.iter().any(|s| s.to_lowercase().contains("vulkan")));
     }
 
     #[test]
@@ -3184,7 +3192,7 @@ mod tests {
         let diagnosis = CpuFallbackDiagnosis {
             has_sufficient_vram: true,
             model_on_cpu: true,
-            likely_cause: CpuFallbackCause::AmdNeedsCustomOllama {
+            likely_cause: CpuFallbackCause::AmdNeedsVulkan {
                 gfx_version: "gfx1200".to_string(),
             },
             fix_steps: vec![

@@ -339,14 +339,20 @@ export HSA_OVERRIDE_GFX_VERSION=11.0.0
 echo 'export HSA_OVERRIDE_GFX_VERSION=11.0.0' >> ~/.bashrc
 ```
 
-**4. Use ollama-for-amd fork:**
+**4. For RDNA 4 (RX 9000 series), use Vulkan backend:**
 ```bash
-# Uninstall standard Ollama
-sudo systemctl stop ollama
-sudo rm /usr/local/bin/ollama
+# Set Vulkan environment variable
+export OLLAMA_VULKAN=1
+ollama serve
 
-# Install fork (instructions from rigrun gpu-setup)
-rigrun gpu-setup
+# Or make it permanent
+echo 'export OLLAMA_VULKAN=1' >> ~/.bashrc
+```
+
+On Windows:
+```batch
+set OLLAMA_VULKAN=1
+ollama serve
 ```
 
 **5. Add user to groups:**
