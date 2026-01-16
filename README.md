@@ -275,12 +275,12 @@ rigrun models
 | OpenRouter Mixtral | 100% cloud | **$12.00** | 60% |
 | **rigrun (90% local)** | Cache + GPU + Cloud | **$1.20** | **96% savings** |
 
-### Real Developer Example (10M tokens/month)
-**Before rigrun** (OpenAI GPT-4):
+### Example Scenario (10M tokens/month)
+**Without rigrun** (OpenAI GPT-4):
 - Monthly cost: **$300**
 - Annual cost: **$3,600**
 
-**After rigrun** (90% local GPU, 10% cloud):
+**With rigrun** (90% local GPU, 10% cloud):
 - Monthly cost: **$30** (90% handled by your GPU)
 - Annual cost: **$360**
 - **Annual savings: $3,240**
@@ -314,7 +314,7 @@ rigrun test --adversarial # Run adversarial attack tests
 
 ---
 
-## Key Features - Why Developers Choose rigrun
+## Key Features - Why Developers Should Choose rigrun
 
 ### 1. Classification-Aware Routing (Unique to rigrun)
 Automatic detection and enforcement of data classification:
@@ -338,7 +338,7 @@ Context-aware deduplication using embeddings:
 - Automatic persistence across restarts
 - Works with any LLM model (GPT, Claude, local models)
 
-**Cache hit rate**: 40-60% typical for development workflows
+**Expected cache hit rate**: 40-60% for typical development workflows
 
 ### 4. Zero-Config GPU Auto-Detection
 One command to rule them all:
@@ -356,7 +356,7 @@ Monitor every dollar saved:
 - **Daily/weekly reports**: Track savings over time
 - **Prometheus-compatible metrics** via `/stats` endpoint
 
-**Typical savings report**: "Saved $245 this month by handling 87% of requests locally"
+**Example savings report**: "Saved $245 this month by handling 87% of requests locally"
 
 ---
 
@@ -445,7 +445,7 @@ The setup wizard auto-generates configurations using your local AI!
 
 ---
 
-## Who Uses rigrun?
+## Who Should Use rigrun?
 
 rigrun is built for organizations that cannot compromise on security:
 
@@ -455,7 +455,7 @@ rigrun is built for organizations that cannot compromise on security:
 - **Enterprise Teams**: Self-hosted AI for compliance requirements
 - **Security-Conscious Developers**: Local-first AI that respects your data
 
-### Production Deployments
+### Production Readiness
 
 rigrun is production-ready for government and defense use. The classification router has been validated with:
 
