@@ -3,7 +3,7 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/rigrun/rigrun?color=orange)](https://github.com/rigrun/rigrun/releases)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![IL5 Compliant](https://img.shields.io/badge/DoD-IL5_Compliant-green.svg)](#security--compliance)
+[![IL5 Compliant](https://img.shields.io/badge/DoW-IL5_Compliant-green.svg)](#security--compliance)
 [![Routing Accuracy](https://img.shields.io/badge/routing_accuracy-100%25-brightgreen.svg)](#test-results)
 [![Air-Gapped Ready](https://img.shields.io/badge/air--gapped-ready-blue.svg)](#air-gapped-security)
 [![Stars](https://img.shields.io/github/stars/rigrun/rigrun?style=social)](https://github.com/rigrun/rigrun)
@@ -17,7 +17,7 @@
            |___/  v0.1.0
 ```
 
-**The only LLM router built for DoD/IL5 classification requirements.** rigrun intelligently routes queries based on data classification levels, ensuring classified content NEVER touches cloud APIs while maintaining full OpenAI compatibility for unclassified workloads.
+**The only LLM router built for DoW/IL5 classification requirements.** rigrun intelligently routes queries based on data classification levels, ensuring classified content NEVER touches cloud APIs while maintaining full OpenAI compatibility for unclassified workloads.
 
 ---
 
@@ -41,9 +41,9 @@ rigrun is the **first and only** LLM router that understands data classification
 
 **This is the key differentiator.** No other solution provides automatic classification detection and routing enforcement.
 
-### IL5/DoD Compliance
+### IL5/DoW Compliance
 
-rigrun meets Department of Defense Impact Level 5 (IL5) requirements:
+rigrun meets Department of War Impact Level 5 (IL5) requirements:
 
 - **Data Sovereignty**: Classified data never leaves your infrastructure
 - **Access Control**: Full audit logging of all queries and routing decisions
@@ -471,7 +471,7 @@ rigrun is production-ready for government and defense use. The classification ro
 | Feature | rigrun | LiteLLM | OpenAI Proxy | Raw Ollama |
 |---------|--------|---------|--------------|------------|
 | **Classification Routing** | **100% Accurate** | None | None | None |
-| **IL5/DoD Compliant** | **Yes** | No | No | No |
+| **IL5/DoW Compliant** | **Yes** | No | No | No |
 | **Air-Gap Support** | **Built-in** | No | No | Manual |
 | **Adversarial Tested** | **53/53 Blocked** | No | No | No |
 | **Semantic Caching** | Built-in | No | No | No |
