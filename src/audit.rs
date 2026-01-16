@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! Audit Logging Module for Rigrun Privacy Features
 //!
 //! Logs every query with details for transparency and privacy auditing.
@@ -504,7 +507,8 @@ mod tests {
 
     #[test]
     fn test_redact_secrets_github_token() {
-        let text = "GitHub token: ghp_1234567890abcdefghijklmnopqrstuvw";
+        // GitHub tokens are ghp_ followed by exactly 36 alphanumeric chars
+        let text = "GitHub token: ghp_1234567890abcdefghijklmnopqrstuvwxyz";
         let redacted = redact_secrets(text);
         assert_eq!(redacted, "GitHub token: [REDACTED_GITHUB_TOKEN]");
     }
@@ -525,7 +529,8 @@ mod tests {
 
     #[test]
     fn test_redact_secrets_multiple_new_patterns() {
-        let text = "AWS: AKIAIOSFODNN7EXAMPLE, GitHub: ghp_abcdefghijklmnopqrstuvwxyz123456, password=secret123";
+        // GitHub tokens need exactly 36 chars after ghp_
+        let text = "AWS: AKIAIOSFODNN7EXAMPLE, GitHub: ghp_abcdefghijklmnopqrstuvwxyz1234567890, password=secret123";
         let redacted = redact_secrets(text);
         assert!(redacted.contains("[REDACTED_AWS_KEY]"));
         assert!(redacted.contains("[REDACTED_GITHUB_TOKEN]"));

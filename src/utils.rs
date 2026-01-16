@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! Utility functions for rigrun.
 //!
 //! This module provides common utility functions used across the codebase.

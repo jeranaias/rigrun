@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 // Background server implementation for rigrun
 
 use anyhow::{Context, Result};

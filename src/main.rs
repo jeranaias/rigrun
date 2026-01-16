@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 use anyhow::{Context, Result};
 use chrono;
 use clap::{Parser, Subcommand};
@@ -82,12 +85,16 @@ enum Commands {
     /// Examples:
     ///   rigrun ask "What is Rust?"
     ///   rigrun ask "Explain closures" --model qwen2.5-coder:7b
+    ///   rigrun ask "Review this:" --file code.rs
     Ask {
         /// The question to ask
-        question: String,
+        question: Option<String>,
         /// Model to use (defaults to local)
         #[arg(short, long)]
         model: Option<String>,
+        /// File to include with the question (content appended after question)
+        #[arg(short, long)]
+        file: Option<String>,
     },
 
     /// Start interactive chat session
@@ -1902,22 +1909,50 @@ fn handle_gpu_setup() -> Result<()> {
 }
 
 /// Handle the ask command - send a single question to rigrun
-async fn handle_ask(question: &str, model: Option<&str>) -> Result<()> {
+/// Supports file input: `rigrun ask "Review this:" --file code.rs`
+async fn handle_ask(question: Option<&str>, model: Option<&str>, file: Option<&str>) -> Result<()> {
+    use std::fs;
+
+    // Build the final question from arg + file content
+    let final_question = {
+        let file_content = if let Some(path) = file {
+            match fs::read_to_string(path) {
+                Ok(content) => Some(content),
+                Err(e) => {
+                    eprintln!("Error reading file '{}': {}", path, e);
+                    return Ok(());
+                }
+            }
+        } else {
+            None
+        };
+
+        match (question, file_content) {
+            (Some(q), Some(content)) => format!("{}\n\n{}", q, content),  // Question + file
+            (Some(q), None) => q.to_string(),  // Just the question
+            (None, Some(content)) => format!("Please analyze this:\n\n{}", content),  // Just file
+            (None, None) => {
+                eprintln!("Error: No question provided. Use: rigrun ask \"your question\" or --file <path>");
+                return Ok(());
+            }
+        }
+    };
+
     let model = model.unwrap_or("local");
     let url = "http://localhost:8787/v1/chat/completions";
-    
+
     let client = reqwest::Client::new();
     let body = serde_json::json!({
         "model": model,
-        "messages": [{"role": "user", "content": question}]
+        "messages": [{"role": "user", "content": final_question}]
     });
-    
+
     let response = client.post(url)
         .json(&body)
         .timeout(std::time::Duration::from_secs(300))
         .send()
         .await;
-    
+
     match response {
         Ok(res) => {
             if res.status().is_success() {
@@ -1936,7 +1971,7 @@ async fn handle_ask(question: &str, model: Option<&str>) -> Result<()> {
             eprintln!("Make sure rigrun server is running (rigrun &)");
         }
     }
-    
+
     Ok(())
 }
 
@@ -2236,8 +2271,65 @@ fn check_port_available(port: u16) -> anyhow::Result<()> {
 }
 
 
-#[tokio::main]
-async fn main() -> Result<()> {
+/// Async operations that require the Tokio runtime.
+/// This is separated from main() to avoid runtime conflicts with blocking code.
+async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_mode: bool) -> Result<()> {
+    match command {
+        AsyncCommand::StartServer => {
+            // Check if this is first run
+            if !config.first_run_complete {
+                // FIRST RUN: Show wizard ONLY, start server AFTER wizard completes
+                clear_screen();
+                if let Err(e) = firstrun::show_first_run_menu(config).await {
+                    eprintln!("{YELLOW}[!]{RESET} Setup error: {}", e);
+                }
+
+                // After wizard completes, clear screen and start clean server
+                clear_screen();
+                print_banner();
+                if paranoid_mode {
+                    print_paranoid_banner();
+                }
+                start_server(config).await?;
+            } else {
+                // SUBSEQUENT RUNS: Skip wizard, go straight to clean server
+                clear_screen();
+                print_banner();
+                if paranoid_mode {
+                    print_paranoid_banner();
+                }
+                start_server(config).await?;
+            }
+        }
+        AsyncCommand::Ask { question, model, file } => {
+            if paranoid_mode {
+                print_paranoid_banner();
+            }
+            handle_ask(question.as_deref(), model.as_deref(), file.as_deref()).await?;
+        }
+        AsyncCommand::IdeSetup => {
+            handle_ide_setup().await?;
+        }
+        AsyncCommand::Doctor => {
+            run_doctor().await?;
+        }
+        AsyncCommand::Pull { model } => {
+            pull_model(model).await?;
+        }
+    }
+    Ok(())
+}
+
+/// Commands that require async runtime
+enum AsyncCommand {
+    StartServer,
+    Ask { question: Option<String>, model: Option<String>, file: Option<String> },
+    IdeSetup,
+    Doctor,
+    Pull { model: String },
+}
+
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Check if paranoid mode is enabled via CLI or config
@@ -2258,14 +2350,13 @@ async fn main() -> Result<()> {
     // Check if we have a prompt argument (either direct prompt or stdin)
     let stdin_is_piped = !io::stdin().is_terminal();
 
+    // Handle direct prompts (these use blocking client, no async needed)
     if let Some(prompt_text) = cli.prompt {
-        // Direct prompt: rigrun "prompt text"
         if paranoid_mode {
             print_paranoid_banner();
         }
         return direct_prompt(&prompt_text, None);
     } else if stdin_is_piped && cli.command.is_none() {
-        // Piped input: echo "prompt" | rigrun
         let input = read_stdin()?;
         if !input.trim().is_empty() {
             if paranoid_mode {
@@ -2275,41 +2366,33 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Determine if we need async runtime or can run synchronously
+    let async_command = match &cli.command {
+        None => Some(AsyncCommand::StartServer),
+        Some(Commands::Ask { question, model, file }) => Some(AsyncCommand::Ask {
+            question: question.clone(),
+            model: model.clone(),
+            file: file.clone(),
+        }),
+        Some(Commands::Setup { command }) => match command {
+            SetupCommands::Ide => Some(AsyncCommand::IdeSetup),
+            SetupCommands::Gpu => None, // Sync
+        },
+        Some(Commands::Doctor) => Some(AsyncCommand::Doctor),
+        Some(Commands::Pull { model }) => Some(AsyncCommand::Pull { model: model.clone() }),
+        Some(Commands::IdeSetup) => Some(AsyncCommand::IdeSetup), // Legacy
+        _ => None, // All other commands are synchronous
+    };
+
+    // If we need async, create runtime and run
+    if let Some(cmd) = async_command {
+        let runtime = tokio::runtime::Runtime::new()
+            .expect("Failed to create Tokio runtime");
+        return runtime.block_on(run_async_command(cmd, &mut config, paranoid_mode));
+    }
+
+    // Otherwise, run synchronous commands directly (no runtime conflict)
     match cli.command {
-        None => {
-            // Default: start the server
-
-            // Check if this is first run
-            if !config.first_run_complete {
-                // FIRST RUN: Show wizard ONLY, start server AFTER wizard completes
-                clear_screen();
-                if let Err(e) = firstrun::show_first_run_menu(&mut config).await {
-                    eprintln!("{YELLOW}[!]{RESET} Setup error: {}", e);
-                }
-
-                // After wizard completes, clear screen and start clean server
-                clear_screen();
-                print_banner();
-                if paranoid_mode {
-                    print_paranoid_banner();
-                }
-                start_server(&config).await?;
-            } else {
-                // SUBSEQUENT RUNS: Skip wizard, go straight to clean server
-                clear_screen();
-                print_banner();
-                if paranoid_mode {
-                    print_paranoid_banner();
-                }
-                start_server(&config).await?;
-            }
-        }
-        Some(Commands::Ask { question, model }) => {
-            if paranoid_mode {
-                print_paranoid_banner();
-            }
-            handle_ask(&question, model.as_deref()).await?;
-        }
         Some(Commands::Chat { model }) => {
             if paranoid_mode {
                 print_paranoid_banner();
@@ -2327,27 +2410,18 @@ async fn main() -> Result<()> {
         }
         Some(Commands::Setup { command }) => {
             match command {
-                SetupCommands::Ide => {
-                    handle_ide_setup().await?;
-                }
                 SetupCommands::Gpu => {
                     handle_gpu_setup()?;
                 }
+                _ => unreachable!(), // Ide handled above
             }
         }
         Some(Commands::Cache { command }) => {
             handle_cache(command)?;
         }
-        Some(Commands::Doctor) => {
-            run_doctor().await?;
-        }
         Some(Commands::Models) => {
             list_models()?;
         }
-        Some(Commands::Pull { model }) => {
-            pull_model(model).await?;
-        }
-        // Legacy commands (hidden but still functional for backward compatibility)
         Some(Commands::Examples) => {
             handle_cli_examples()?;
         }
@@ -2357,15 +2431,13 @@ async fn main() -> Result<()> {
         Some(Commands::Stop) => {
             background::handle_stop_server()?;
         }
-        Some(Commands::IdeSetup) => {
-            handle_ide_setup().await?;
-        }
         Some(Commands::GpuSetup) => {
             handle_gpu_setup()?;
         }
         Some(Commands::Export { output }) => {
             handle_export(output)?;
         }
+        _ => unreachable!(), // Async commands handled above
     }
 
     Ok(())

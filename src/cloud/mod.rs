@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! OpenRouter integration
 //!
 //! Provides cloud LLM inference through OpenRouter API for fallback
@@ -23,6 +26,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tokio::time::sleep;
 
 // Re-export Message from types for API compatibility
 pub use crate::types::Message;
@@ -32,6 +36,15 @@ const DEFAULT_OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
 
 /// Default timeout for API requests (in seconds).
 const REQUEST_TIMEOUT_SECS: u64 = 120;
+
+/// Maximum retry attempts for transient errors.
+const MAX_RETRIES: u32 = 3;
+
+/// Base delay for exponential backoff (milliseconds).
+const RETRY_BASE_DELAY_MS: u64 = 500;
+
+/// Maximum delay for exponential backoff (milliseconds).
+const RETRY_MAX_DELAY_MS: u64 = 10000;
 
 /// Response from OpenRouter generation.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -326,7 +339,7 @@ impl OpenRouterClient {
         self.chat(model, messages).await
     }
 
-    /// Perform a chat completion.
+    /// Perform a chat completion with automatic retry and exponential backoff.
     pub async fn chat(&self, model: &str, messages: Vec<Message>) -> Result<OpenRouterResponse> {
         let api_key = self.api_key.as_ref()
             .ok_or_else(|| anyhow!(OpenRouterError::NotConfigured(
@@ -334,89 +347,131 @@ impl OpenRouterClient {
             )))?;
 
         let url = format!("{}/chat/completions", self.base_url);
-
-        let mut request = self.client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json");
-
-        // Add optional headers
-        if let Some(ref site_url) = self.site_url {
-            request = request.header("HTTP-Referer", site_url);
-        }
-        if let Some(ref site_name) = self.site_name {
-            request = request.header("X-Title", site_name);
-        }
-
         let body = serde_json::json!({
             "model": model,
             "messages": messages,
         });
 
-        let response = request
-            .json(&body)
-            .timeout(self.timeout)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    anyhow!(OpenRouterError::NetworkError(
-                        "Request timed out.".to_string()
-                    ))
-                } else {
-                    anyhow!(OpenRouterError::NetworkError(format!(
-                        "Failed to connect to OpenRouter: {}",
-                        e
-                    )))
+        let mut last_error = None;
+
+        for attempt in 0..MAX_RETRIES {
+            if attempt > 0 {
+                // Exponential backoff: 500ms, 1000ms, 2000ms, ... capped at 10s
+                let delay = std::cmp::min(
+                    RETRY_BASE_DELAY_MS * (1 << attempt),
+                    RETRY_MAX_DELAY_MS
+                );
+                tracing::debug!("Retry attempt {} after {}ms delay", attempt + 1, delay);
+                sleep(Duration::from_millis(delay)).await;
+            }
+
+            let mut request = self.client
+                .post(&url)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .header("Content-Type", "application/json")
+                .header("User-Agent", "rigrun/0.2.0");
+
+            // Add optional headers
+            if let Some(ref site_url) = self.site_url {
+                request = request.header("HTTP-Referer", site_url);
+            }
+            if let Some(ref site_name) = self.site_name {
+                request = request.header("X-Title", site_name);
+            }
+
+            let response = match request
+                .json(&body)
+                .timeout(self.timeout)
+                .send()
+                .await
+            {
+                Ok(resp) => resp,
+                Err(e) => {
+                    let err = if e.is_timeout() {
+                        OpenRouterError::NetworkError("Request timed out.".to_string())
+                    } else if e.is_connect() {
+                        OpenRouterError::NetworkError(format!(
+                            "Failed to connect to OpenRouter: {}",
+                            e
+                        ))
+                    } else {
+                        OpenRouterError::NetworkError(format!("Network error: {}", e))
+                    };
+                    last_error = Some(err);
+                    continue; // Retry on network errors
                 }
-            })?;
+            };
 
-        let status = response.status();
+            let status = response.status();
+            let status_code = status.as_u16();
 
-        if !status.is_success() {
-            let error_text = response.text().await.unwrap_or_default();
+            // Handle non-success responses
+            if !status.is_success() {
+                let error_text = response.text().await.unwrap_or_default();
 
-            if status.as_u16() == 401 {
-                return Err(anyhow!(OpenRouterError::AuthError(
-                    "Invalid API key.".to_string()
-                )));
+                // Non-retryable errors - fail immediately
+                if status_code == 401 {
+                    return Err(anyhow!(OpenRouterError::AuthError(
+                        "Invalid API key.".to_string()
+                    )));
+                }
+                if status_code == 402 {
+                    return Err(anyhow!(OpenRouterError::ApiError(
+                        "Insufficient credits. Add funds at https://openrouter.ai/credits".to_string()
+                    )));
+                }
+                if status_code == 404 || error_text.contains("not found") {
+                    return Err(anyhow!(OpenRouterError::ModelNotFound(model.to_string())));
+                }
+
+                // Retryable errors
+                if status_code == 429 {
+                    last_error = Some(OpenRouterError::RateLimited("Too many requests.".to_string()));
+                    continue; // Retry with backoff
+                }
+                if status_code >= 500 && status_code < 600 {
+                    last_error = Some(OpenRouterError::ApiError(format!(
+                        "Server error: HTTP {} - {}",
+                        status, error_text
+                    )));
+                    continue; // Retry on server errors
+                }
+
+                // Unknown error - don't retry
+                return Err(anyhow!(OpenRouterError::ApiError(format!(
+                    "API error: HTTP {} - {}",
+                    status, error_text
+                ))));
             }
-            if status.as_u16() == 429 {
-                return Err(anyhow!(OpenRouterError::RateLimited(
-                    "Too many requests.".to_string()
-                )));
-            }
-            if status.as_u16() == 404 || error_text.contains("not found") {
-                return Err(anyhow!(OpenRouterError::ModelNotFound(model.to_string())));
-            }
 
-            return Err(anyhow!(OpenRouterError::ApiError(format!(
-                "API error: HTTP {} - {}",
-                status, error_text
-            ))));
+            // Success - parse response
+            let chat_response: ChatCompletionResponse = response
+                .json()
+                .await
+                .context("Failed to parse chat response")?;
+
+            let response_text = chat_response.choices
+                .first()
+                .and_then(|c| c.message.content.clone())
+                .unwrap_or_default();
+
+            let (prompt_tokens, completion_tokens) = chat_response.usage
+                .map(|u| (u.prompt_tokens, u.completion_tokens))
+                .unwrap_or((0, 0));
+
+            return Ok(OpenRouterResponse {
+                response: response_text,
+                prompt_tokens,
+                completion_tokens,
+                model: chat_response.model.unwrap_or_else(|| model.to_string()),
+                cost_usd: None,
+            });
         }
 
-        let chat_response: ChatCompletionResponse = response
-            .json()
-            .await
-            .context("Failed to parse chat response")?;
-
-        let response_text = chat_response.choices
-            .first()
-            .and_then(|c| c.message.content.clone())
-            .unwrap_or_default();
-
-        let (prompt_tokens, completion_tokens) = chat_response.usage
-            .map(|u| (u.prompt_tokens, u.completion_tokens))
-            .unwrap_or((0, 0));
-
-        Ok(OpenRouterResponse {
-            response: response_text,
-            prompt_tokens,
-            completion_tokens,
-            model: chat_response.model.unwrap_or_else(|| model.to_string()),
-            cost_usd: None, // OpenRouter doesn't return cost directly
-        })
+        // All retries exhausted
+        Err(anyhow!(last_error.unwrap_or_else(|| OpenRouterError::ApiError(
+            "Max retries exceeded".to_string()
+        ))))
     }
 
     /// Get the base URL.
@@ -440,22 +495,12 @@ pub async fn generate(model: &str, prompt: &str) -> Result<OpenRouterResponse> {
     OpenRouterClient::new().generate(model, prompt).await
 }
 
-/// Popular models available on OpenRouter.
+/// Model constants for OpenRouter.
 pub mod models {
-    /// Claude 3 Haiku - fast and cheap.
-    pub const CLAUDE_3_HAIKU: &str = "anthropic/claude-3-haiku";
-    /// Claude 3 Sonnet - balanced.
-    pub const CLAUDE_3_SONNET: &str = "anthropic/claude-3-sonnet";
-    /// Claude 3 Opus - most capable.
-    pub const CLAUDE_3_OPUS: &str = "anthropic/claude-3-opus";
-    /// GPT-4o - OpenAI's flagship.
-    pub const GPT_4O: &str = "openai/gpt-4o";
-    /// GPT-4o-mini - fast and cheap.
-    pub const GPT_4O_MINI: &str = "openai/gpt-4o-mini";
-    /// Llama 3.1 70B - open source.
-    pub const LLAMA_3_1_70B: &str = "meta-llama/llama-3.1-70b-instruct";
-    /// Llama 3.1 8B - lightweight open source.
-    pub const LLAMA_3_1_8B: &str = "meta-llama/llama-3.1-8b-instruct";
+    /// Auto-router - OpenRouter picks the best model for the task (RECOMMENDED).
+    /// This is the most cost-effective option as OpenRouter intelligently
+    /// routes to cheaper models when possible.
+    pub const AUTO: &str = "openrouter/auto";
 }
 
 #[cfg(test)]
@@ -491,6 +536,6 @@ mod tests {
         assert!(err.to_string().contains("Authentication"));
 
         let err = OpenRouterError::RateLimited("test".to_string());
-        assert!(err.to_string().contains("Rate limited"));
+        assert!(err.to_string().contains("Rate limit"));
     }
 }

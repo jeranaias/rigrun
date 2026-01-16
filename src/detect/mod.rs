@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan
+// Licensed under the MIT License. See LICENSE file for details.
+
 //! GPU Detection Module for rigrun
 //!
 //! This module provides functionality to detect available GPUs on the system,
