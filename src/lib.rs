@@ -24,6 +24,8 @@
 
 pub mod audit;
 pub mod cache;
+pub mod cli_session;
+pub mod classification_ui;
 pub mod cloud;
 pub mod consent_banner;
 pub mod detect;
@@ -42,6 +44,11 @@ pub mod utils;
 
 // Re-export commonly used types from types module
 pub use types::Tier;
+
+// Re-export streaming types for true streaming responses
+pub use types::{
+    StreamingConfig, StreamChunk, PartialResponse, InterruptReason,
+};
 
 // Re-export commonly used types from router
 pub use router::{
@@ -105,6 +112,15 @@ pub use security::{
     DOD_STIG_MAX_SESSION_TIMEOUT_SECS, DOD_STIG_WARNING_BEFORE_TIMEOUT_SECS,
 };
 
+// Re-export classification UI types (CUI marking per DoDI 5200.48)
+pub use classification_ui::{
+    ClassificationLevel, ClassificationConfig, CuiDesignation,
+    render_top_banner, render_bottom_banner, render_designation_block,
+    wrap_with_banners, wrap_with_full_markings, get_api_headers,
+    inline_marker, print_startup_classification, print_shutdown_classification,
+    load_classification_config,
+};
+
 // Re-export setup types
 pub use setup::{
     run_setup, SetupWizard, SetupMode, SetupResult, HardwareMode,
@@ -130,4 +146,14 @@ pub use health::{
     HealthChecker, HealthStatus, HealthIssue, Severity,
     run_health_check as health_check, run_quick_health_check, auto_fix_issues,
     format_health_status, GpuInfoStatus,
+    // Startup health check
+    check_startup_health, StartupHealthResult,
+    print_startup_warnings, print_critical_and_exit,
+};
+
+// Re-export CLI session types (DoD STIG IL5 compliance)
+pub use cli_session::{
+    CliSession, CliSessionConfig, CliSessionState,
+    read_line_with_timeout,
+    CLI_SESSION_TIMEOUT_SECS, CLI_WARNING_BEFORE_TIMEOUT_SECS,
 };

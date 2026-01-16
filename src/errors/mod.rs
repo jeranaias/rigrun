@@ -601,7 +601,7 @@ mod tests {
     fn test_generate_reference_code() {
         let code = generate_reference_code();
         assert!(code.starts_with("ERR-"));
-        assert_eq!(code.len(), 18); // ERR-YYYYMMDD-XXXXXX
+        assert_eq!(code.len(), 19); // ERR-YYYYMMDD-XXXXXX = 4+8+1+6
 
         // Should be unique
         let code2 = generate_reference_code();
