@@ -1,5 +1,9 @@
 # Installation Guide
 
+> **Note:** Installation instructions have been consolidated into the [**GETTING_STARTED.md**](GETTING_STARTED.md) guide. Please use that guide for the most up-to-date instructions covering installation, GPU setup, and troubleshooting in one place.
+
+---
+
 Complete installation instructions for rigrun across all supported platforms.
 
 ---

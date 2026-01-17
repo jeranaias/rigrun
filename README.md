@@ -182,9 +182,7 @@ print(response.choices[0].message.content)
 Congratulations! You just ran your first local AI query.
 
 **Next Steps:**
-- [Getting Started Guide](docs/getting-started.md) - Complete walkthrough
-- [Installation Guide](docs/installation.md) - Detailed installation for all platforms
-- [Configuration](docs/configuration.md) - Customize rigrun for your needs
+- [**Getting Started Guide**](docs/GETTING_STARTED.md) - Complete walkthrough with GPU setup, troubleshooting, and more
 
 ---
 
@@ -612,13 +610,14 @@ This project is [MIT](LICENSE) licensed - use it anywhere, commercially or perso
 
 ## Documentation
 
-Complete documentation is available in the `docs/` folder:
+**Start here:** [**Getting Started Guide**](docs/GETTING_STARTED.md) - Everything you need in one place.
 
-- **[Getting Started](docs/getting-started.md)** - First-run guide with step-by-step setup
-- **[Installation](docs/installation.md)** - Detailed installation for all platforms and GPUs
-- **[Configuration](docs/configuration.md)** - All configuration options explained
+Additional reference documentation:
+
 - **[API Reference](docs/api-reference.md)** - Complete API documentation with examples
-- **[Troubleshooting](docs/troubleshooting.md)** - Solutions to common problems
+- **[Configuration](docs/configuration.md)** - All configuration options explained
+- **[CLI Reference](CLI_REFERENCE.md)** - Full command reference
+- **[GPU Compatibility](docs/GPU_COMPATIBILITY.md)** - Detailed GPU setup for NVIDIA, AMD, Apple Silicon
 - **[Security & Compliance](docs/security.md)** - Classification routing, IL5 compliance, and best practices
 - **[Contributing](docs/contributing.md)** - Developer setup and contribution guidelines
 - **[Changelog](CHANGELOG.md)** - Version history and release notes

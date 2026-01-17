@@ -94,6 +94,9 @@ regex = "1"
 # Hostname detection for audit logging
 hostname = "0.3"
 
+# Interactive line editing with completion
+rustyline = "14.0"
+
 [[bin]]
 name = "rigrun"
 path = "src/main.rs"

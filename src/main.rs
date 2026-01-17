@@ -25,9 +25,11 @@ use rigrun::detect::{
     get_gpu_setup_status, AmdArchitecture,
 };
 use rigrun::local::{OllamaClient, Message};
+use rigrun::cli::{InteractiveInput, show_help, show_command_menu};
 
 mod background;
 mod consent_banner;
+mod conversation_store;
 
 // Use firstrun from the library crate
 use rigrun::firstrun;
@@ -353,6 +355,12 @@ pub struct Config {
     /// Set to false for non-DoD deployments
     #[serde(default = "default_dod_banner_enabled")]
     pub dod_banner_enabled: bool,
+    /// Show status line in interactive chat (default: true)
+    #[serde(default = "default_show_status_line")]
+    pub show_status_line: bool,
+    /// Status line style: "full", "compact", or "minimal" (default: "compact")
+    #[serde(default = "default_status_line_style")]
+    pub status_line_style: String,
 }
 
 fn default_audit_log_enabled() -> bool {
@@ -361,6 +369,14 @@ fn default_audit_log_enabled() -> bool {
 
 fn default_dod_banner_enabled() -> bool {
     true
+}
+
+fn default_show_status_line() -> bool {
+    true
+}
+
+fn default_status_line_style() -> String {
+    "compact".to_string()
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -1214,31 +1230,84 @@ fn direct_prompt(prompt: &str, model: Option<String>) -> Result<()> {
 
 pub fn interactive_chat(model: Option<String>) -> Result<()> {
     use rigrun::cli_session::{CliSession, CliSessionConfig, CliSessionState};
+    use rigrun::status_indicator::{StatusIndicator, StatusConfig, StatusLineStyle, OperatingMode};
+    use rigrun::detect::GpuType;
+    use conversation_store::{ConversationStore, CommandResult, handle_slash_command};
 
-    let model = model.unwrap_or_else(get_model_from_config);
+    let mut model = model.unwrap_or_else(get_model_from_config);
     let client = OllamaClient::new();
 
     ensure_model_available(&client, &model)?;
+
+    // Load config for status line settings
+    let config = load_config().unwrap_or_default();
+
+    // Initialize status indicator
+    let status_config = StatusConfig {
+        show_status_line: config.show_status_line,
+        status_line_style: StatusLineStyle::from_str(&config.status_line_style)
+            .unwrap_or(StatusLineStyle::Compact),
+        show_session_time: true,
+        show_vram_usage: false,
+        show_token_count: false,
+    };
+    let mut status_indicator = StatusIndicator::new(status_config);
+    status_indicator.set_model(&model);
+    status_indicator.set_mode(OperatingMode::Local);
+    status_indicator.refresh_gpu_status();
+    status_indicator.set_session_start(Instant::now(), rigrun::CLI_SESSION_TIMEOUT_SECS);
+
+    // Initialize conversation storage
+    let store = ConversationStore::new()
+        .context("Failed to initialize conversation storage")?;
 
     // Create CLI session with DoD STIG IL5 defaults (15-minute timeout)
     let session_config = CliSessionConfig::dod_stig_default();
     let mut session = CliSession::new("cli-user", session_config);
     session.acknowledge_consent(); // Consent was already shown at startup
 
+    // Initialize interactive input with tab completion
+    let mut input_handler = InteractiveInput::new()
+        .context("Failed to initialize interactive input")?;
+
+    // Set up models for completion
+    let available_models = list_ollama_models();
+    input_handler.set_models(available_models);
+    input_handler.set_current_model(Some(model.clone()));
+
+    // Set up saved conversation IDs for /resume completion
+    if let Ok(conversations) = store.list() {
+        let ids: Vec<String> = conversations.iter().map(|c| c.id.clone()).collect();
+        input_handler.set_conversation_ids(ids);
+    }
+
+    // Show startup banner with optional full status line
+    println!();
+    if config.show_status_line && matches!(status_indicator.config.status_line_style, StatusLineStyle::Full) {
+        status_indicator.render();
+    }
     println!(
-        "\n{} Interactive chat mode | Model: {} | Type 'exit' or Ctrl+C to quit",
-        "rigrun".bright_cyan().bold(),
-        model.bright_white()
+        "{} Interactive chat mode | Type 'exit' or Ctrl+C to quit",
+        "rigrun".bright_cyan().bold()
     );
     println!(
-        "{} Session timeout: {} minutes (DoD STIG IL5)\n",
+        "{} Model: {} | Mode: {} | Session: {} min",
         "[i]".bright_blue(),
+        model.bright_white(),
+        "local".green(),
         rigrun::CLI_SESSION_TIMEOUT_SECS / 60
+    );
+    println!(
+        "{} Type {} for commands (/status, /model), Tab for completion\n",
+        "[i]".bright_blue(),
+        "/help".bright_cyan()
     );
 
     let mut conversation: Vec<Message> = Vec::new();
+    let mut auto_save = false;
+    let mut current_conversation_id: Option<String> = None;
+    // Keep a fallback stdin for session warning acknowledgment
     let stdin = io::stdin();
-    let mut reader = stdin.lock();
 
     loop {
         // Check session timeout before each prompt
@@ -1274,7 +1343,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                     print!("{} Press ENTER to continue... ", "[!]".yellow());
                     io::stdout().flush()?;
                     let mut ack = String::new();
-                    reader.read_line(&mut ack)?;
+                    stdin.read_line(&mut ack)?;
                     session.refresh();
                     println!("{} Session extended.\n", "[+]".green());
                     continue;
@@ -1283,39 +1352,264 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
             }
         }
 
-        // Show prompt with session time remaining
+        // Build prompt with status indicator and session time
         let remaining = session.time_remaining_secs();
         let mins = remaining / 60;
         let secs = remaining % 60;
-        let time_indicator = if remaining <= 120 {
-            format!("[{}:{:02}]", mins, secs).yellow()
+
+        // Build the prompt based on status line style
+        let prompt = if config.show_status_line {
+            match status_indicator.config.status_line_style {
+                StatusLineStyle::Full => {
+                    // Full style shows status line above prompt
+                    status_indicator.render();
+                    let time_indicator = if remaining <= 120 {
+                        format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+                    } else {
+                        format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
+                    };
+                    format!("\x1b[96m\x1b[1mYou:\x1b[0m {} ", time_indicator)
+                }
+                StatusLineStyle::Compact => {
+                    // Compact style: [model | mode | GPU] [time] You:
+                    let model_short = if model.len() > 15 {
+                        format!("{}...", &model[..12])
+                    } else {
+                        model.clone()
+                    };
+                    let gpu_str = status_indicator.gpu_status()
+                        .map(|g| {
+                            if g.gpu_type == GpuType::Cpu {
+                                "CPU"
+                            } else if g.using_gpu {
+                                "GPU\u{2713}"
+                            } else {
+                                "GPU\u{2717}"
+                            }
+                        })
+                        .unwrap_or("?");
+                    let time_indicator = if remaining <= 120 {
+                        format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+                    } else {
+                        format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
+                    };
+                    format!("\x1b[90m[{} | {} | {}]\x1b[0m {} \x1b[96m\x1b[1mYou:\x1b[0m ",
+                        model_short, status_indicator.mode(), gpu_str, time_indicator)
+                }
+                StatusLineStyle::Minimal => {
+                    // Minimal style: [mode|GPU] [time] You:
+                    let gpu_str = status_indicator.gpu_status()
+                        .map(|g| {
+                            if g.gpu_type == GpuType::Cpu {
+                                "CPU"
+                            } else if g.using_gpu {
+                                "GPU"
+                            } else {
+                                "cpu"
+                            }
+                        })
+                        .unwrap_or("?");
+                    let time_indicator = if remaining <= 120 {
+                        format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+                    } else {
+                        format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
+                    };
+                    format!("\x1b[90m[{}|{}]\x1b[0m {} \x1b[96m\x1b[1mYou:\x1b[0m ",
+                        status_indicator.mode(), gpu_str, time_indicator)
+                }
+            }
         } else {
-            format!("[{}:{:02}]", mins, secs).bright_black()
+            // No status line - simple prompt with time
+            let time_indicator = if remaining <= 120 {
+                format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+            } else {
+                format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
+            };
+            format!("\x1b[96m\x1b[1mrigrun>\x1b[0m {} ", time_indicator)
         };
 
-        print!("{} {} ", "rigrun>".bright_cyan().bold(), time_indicator);
-        io::stdout().flush()?;
-
-        // Read user input
-        let mut input = String::new();
-        reader.read_line(&mut input)?;
+        // Read user input with tab completion
+        let input = match input_handler.read_line(&prompt) {
+            Ok(Some(line)) => line,
+            Ok(None) => {
+                // EOF (Ctrl+D) - exit
+                break;
+            }
+            Err(e) => {
+                eprintln!("{} Input error: {}", "[!]".red(), e);
+                continue;
+            }
+        };
         let input = input.trim();
 
         // Refresh session on user activity
         session.refresh();
 
-        // Check for exit
+        // Check for empty input
         if input.is_empty() {
             continue;
         }
+
+        // Check for exit commands (without slash)
         if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+            // Handle auto-save on exit
+            if auto_save && !conversation.is_empty() {
+                println!("{} Auto-saving conversation...", "[i]".bright_blue());
+                if let Some(ref id) = current_conversation_id {
+                    if let Err(e) = store.update(id, conversation.clone()) {
+                        eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                    } else {
+                        println!("{} Conversation saved.", "[+]".green());
+                    }
+                } else {
+                    let saved = conversation_store::SavedConversation::new(&model, conversation.clone());
+                    if let Err(e) = store.save(&saved) {
+                        eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                    } else {
+                        println!("{} Saved: \"{}\"", "[+]".green(), saved.summary);
+                    }
+                }
+            }
             session.terminate("User requested exit");
             println!("Goodbye!");
             break;
         }
 
-        // Add user message to conversation
-        conversation.push(Message::user(input));
+        // Handle slash commands
+        if input.starts_with('/') {
+            // Special case: show help for just "/"
+            if input == "/" {
+                show_command_menu();
+                continue;
+            }
+
+            // Special case: /help command
+            if input == "/help" || input == "/h" || input == "/?" {
+                show_help();
+                continue;
+            }
+
+            // Special case: /model command to change model with completion
+            if input.starts_with("/model ") {
+                let new_model = input.strip_prefix("/model ").unwrap().trim();
+                if !new_model.is_empty() {
+                    // Check if model is available
+                    if is_model_available(new_model) {
+                        model = new_model.to_string();
+                        input_handler.set_current_model(Some(model.clone()));
+                        // Update status indicator with new model
+                        status_indicator.set_model(&model);
+                        status_indicator.refresh_gpu_status();
+                        println!("{} Switched to model: {}", "[+]".green(), model.bright_white());
+                    } else {
+                        println!("{} Model '{}' not found. Use Tab to see available models.", "[!]".yellow(), new_model);
+                    }
+                    continue;
+                }
+            }
+
+            // Update status indicator stats before handling command
+            status_indicator.update_stats(conversation.len() as u32, 0);
+
+            let result = handle_slash_command(
+                input,
+                &conversation,
+                &model,
+                &store,
+                &mut auto_save,
+                &mut current_conversation_id,
+                Some(&status_indicator),
+            )?;
+
+            match result {
+                CommandResult::Continue => {
+                    // Not a command, continue to send to model
+                }
+                CommandResult::Handled => {
+                    // Command was handled, continue loop
+                    continue;
+                }
+                CommandResult::Exit => {
+                    // Handle auto-save on exit
+                    if auto_save && !conversation.is_empty() {
+                        println!("{} Auto-saving conversation...", "[i]".bright_blue());
+                        if let Some(ref id) = current_conversation_id {
+                            if let Err(e) = store.update(id, conversation.clone()) {
+                                eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                            } else {
+                                println!("{} Conversation saved.", "[+]".green());
+                            }
+                        } else {
+                            let saved = conversation_store::SavedConversation::new(&model, conversation.clone());
+                            if let Err(e) = store.save(&saved) {
+                                eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                            } else {
+                                println!("{} Saved: \"{}\"", "[+]".green(), saved.summary);
+                            }
+                        }
+                    }
+                    session.terminate("User requested exit via command");
+                    println!("Goodbye!");
+                    break;
+                }
+                CommandResult::Resume(conv) => {
+                    // Resume the conversation
+                    println!(
+                        "\n{} Resuming \"{}\"...",
+                        "[+]".green(),
+                        conv.summary
+                    );
+                    println!(
+                        "{} Loading {} messages from previous session.\n",
+                        "[i]".bright_blue(),
+                        conv.message_count
+                    );
+
+                    // Load conversation history
+                    conversation = conv.messages.clone();
+                    current_conversation_id = Some(conv.id.clone());
+
+                    // Show last user message for context
+                    if let Some(last_msg) = conv.last_user_message() {
+                        let display_msg = if last_msg.len() > 80 {
+                            format!("{}...", &last_msg[..77])
+                        } else {
+                            last_msg.to_string()
+                        };
+                        println!(
+                            "{} Your last message was:\n  \"{}\"\n",
+                            "[i]".bright_blue(),
+                            display_msg.bright_white()
+                        );
+                    }
+
+                    println!("{} Ready to continue.\n", "[+]".green());
+                    continue;
+                }
+            }
+        }
+
+        // Handle /new and /clear - clear the conversation
+        if input.eq_ignore_ascii_case("/new") || input.eq_ignore_ascii_case("/clear") {
+            conversation.clear();
+            current_conversation_id = None;
+            println!("\n  Starting new conversation. Previous messages cleared.\n");
+            continue;
+        }
+
+        // Process @ mentions for context inclusion
+        let (expanded_input, context_messages) = rigrun::process_mentions(input);
+
+        // Display what context was included
+        for msg in &context_messages {
+            println!("{}", msg.bright_blue());
+        }
+        if !context_messages.is_empty() {
+            println!(); // Extra line after context messages
+        }
+
+        // Add user message to conversation (with expanded context)
+        conversation.push(Message::user(&expanded_input));
 
         let start = Instant::now();
         let mut first_token_received = false;
@@ -1327,7 +1621,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         io::stdout().flush().ok();
 
         // Get response with TRUE streaming (typewriter effect)
-        let response = client.chat_stream(&model, conversation.clone(), |chunk| {
+        let response_result = client.chat_stream(&model, conversation.clone(), |chunk| {
             if !first_token_received {
                 first_token_received = true;
                 time_to_first_token = start.elapsed().as_millis();
@@ -1338,7 +1632,21 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
             accumulated_response.push_str(chunk);
             print!("{}", chunk);
             io::stdout().flush().ok();
-        })?;
+        });
+
+        // Handle response or store error for @error mention
+        let response = match response_result {
+            Ok(r) => r,
+            Err(e) => {
+                // Store error for @error mention
+                rigrun::store_last_error(&format!("{}", e));
+                println!("\r{}\r", " ".repeat(12)); // Clear thinking indicator
+                eprintln!("{} {}", "[Error]".red(), e);
+                // Remove the failed user message from conversation
+                conversation.pop();
+                continue;
+            }
+        };
 
         println!(); // newline after response
 
@@ -2112,11 +2420,13 @@ fn handle_gpu_setup() -> Result<()> {
 
 /// Handle the ask command - send a single question to rigrun
 /// Supports file input: `rigrun ask "Review this:" --file code.rs`
+/// Supports @ mentions: `rigrun ask "@file:src/main.rs explain this code"`
 async fn handle_ask(question: Option<&str>, model: Option<&str>, file: Option<&str>) -> Result<()> {
     use std::fs;
+    use colored::Colorize;
 
-    // Build the final question from arg + file content
-    let final_question = {
+    // Build the initial question from arg + file content
+    let initial_question = {
         let file_content = if let Some(path) = file {
             match fs::read_to_string(path) {
                 Ok(content) => Some(content),
@@ -2139,6 +2449,17 @@ async fn handle_ask(question: Option<&str>, model: Option<&str>, file: Option<&s
             }
         }
     };
+
+    // Process @ mentions for context inclusion
+    let (final_question, context_messages) = rigrun::process_mentions(&initial_question);
+
+    // Display what context was included
+    for msg in &context_messages {
+        eprintln!("{}", msg.bright_blue());
+    }
+    if !context_messages.is_empty() {
+        eprintln!(); // Extra line after context messages
+    }
 
     let model = model.unwrap_or("local");
     let url = "http://localhost:8787/v1/chat/completions";

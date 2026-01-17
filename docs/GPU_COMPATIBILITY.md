@@ -1,5 +1,9 @@
 # GPU Compatibility Guide for rigrun
 
+> **Note:** Essential GPU setup information is now included in the [**GETTING_STARTED.md**](GETTING_STARTED.md) guide. This document contains additional detailed GPU compatibility information and advanced configuration options.
+
+---
+
 This guide covers GPU compatibility for running local LLM inference with Ollama as rigrun's local backend.
 
 ## Quick Reference by GPU Series

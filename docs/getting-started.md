@@ -1,5 +1,9 @@
 # Getting Started with rigrun
 
+> **Note:** This document has been superseded by the consolidated [**GETTING_STARTED.md**](GETTING_STARTED.md) guide. Please use that guide for the most up-to-date and complete instructions.
+
+---
+
 Welcome to rigrun - a self-hosted LLM router that intelligently routes requests through semantic cache, local GPU inference (via Ollama), and cloud fallback (via OpenRouter). This guide will get you from zero to your first API call in under 10 minutes.
 
 ---
