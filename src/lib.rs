@@ -21,13 +21,16 @@
 //! - [`server`] - HTTP server for API compatibility
 //! - [`audit`] - Privacy audit logging for transparency
 //! - [`error`] - Consistent error formatting utilities
+//! - [`context`] - @ mention support for including context in queries
 
 pub mod audit;
 pub mod cache;
+pub mod cli;
 pub mod cli_session;
 pub mod classification_ui;
 pub mod cloud;
 pub mod consent_banner;
+pub mod context;
 pub mod detect;
 pub mod error;
 pub mod errors;
@@ -39,6 +42,7 @@ pub mod security;
 pub mod server;
 pub mod setup;
 pub mod stats;
+pub mod status_indicator;
 pub mod types;
 pub mod utils;
 
@@ -156,4 +160,25 @@ pub use cli_session::{
     CliSession, CliSessionConfig, CliSessionState,
     read_line_with_timeout,
     CLI_SESSION_TIMEOUT_SECS, CLI_WARNING_BEFORE_TIMEOUT_SECS,
+};
+
+// Re-export CLI completion and input types
+pub use cli::{
+    InteractiveInput, SimpleInput, RigrunCompleter,
+    CommandInfo, COMMANDS, parse_command, is_slash_command,
+    get_canonical_command, show_help, show_command_menu, show_filtered_commands,
+};
+
+// Re-export status indicator types
+pub use status_indicator::{
+    StatusIndicator, StatusConfig, StatusLineStyle, OperatingMode,
+    GpuStatus, SessionStats as StatusSessionStats, get_status_prompt,
+};
+
+// Re-export context mention types (@ mention support)
+pub use context::{
+    ContextMention, parse_mentions, fetch_context, format_context_header,
+    build_context_prefix, process_mentions, get_completions,
+    store_last_error, clear_last_error, get_last_error,
+    MENTION_TYPES,
 };

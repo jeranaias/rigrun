@@ -1,5 +1,9 @@
 # Troubleshooting Guide
 
+> **Note:** Common issues and solutions are now included in the [**GETTING_STARTED.md**](GETTING_STARTED.md) guide. For quick answers, check the "Common Issues" section there first. This document contains additional detailed troubleshooting information.
+
+---
+
 Solutions to common problems when using rigrun.
 
 ---
