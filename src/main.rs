@@ -215,12 +215,13 @@ enum Commands {
     /// Cache operations
     ///
     /// Examples:
+    ///   rigrun cache         (shows stats)
     ///   rigrun cache stats
     ///   rigrun cache clear
     ///   rigrun cache export
     Cache {
         #[command(subcommand)]
-        command: CacheCommands,
+        command: Option<CacheCommands>,
     },
 
     /// Diagnose system health and configuration
@@ -588,7 +589,8 @@ fn print_banner() {
   | |_) | |/ _` | |_) | | | | '_ \\
   |  _ <| | (_| |  _ <| |_| | | | |
   |_| \\_\\_|\\__, |_| \\_\\\\__,_|_| |_|
-           |___/{RESET}  v{VERSION}"
+           |___/{RESET}  v{VERSION}
+{DIM}Local-first LLM router • Your GPU first, cloud when needed{RESET}"
     );
     println!();
 }
@@ -1453,6 +1455,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
     let mut conversation: Vec<Message> = Vec::new();
     let mut auto_save = false;
     let mut current_conversation_id: Option<String> = None;
+    let mut last_failed_message: Option<String> = None; // For /retry command
     // Keep a fallback stdin for session warning acknowledgment
     let stdin = io::stdin();
 
@@ -1587,18 +1590,19 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 continue;
             }
         };
-        let input = input.trim();
+        let mut owned_input = input.trim().to_string();
 
         // Refresh session on user activity
         session.refresh();
 
-        // Check for empty input
-        if input.is_empty() {
+        // Check for empty input - provide subtle feedback
+        if owned_input.is_empty() {
+            println!("{}", "(empty - type a message or /help for commands)".bright_black());
             continue;
         }
 
         // Check for exit commands (without slash)
-        if input.eq_ignore_ascii_case("exit") || input.eq_ignore_ascii_case("quit") {
+        if owned_input.eq_ignore_ascii_case("exit") || owned_input.eq_ignore_ascii_case("quit") {
             // Handle auto-save on exit
             if auto_save && !conversation.is_empty() {
                 println!("{} Auto-saving conversation...", "[i]".bright_blue());
@@ -1623,22 +1627,22 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         }
 
         // Handle slash commands
-        if input.starts_with('/') {
+        if owned_input.starts_with('/') {
             // Special case: show help for just "/"
-            if input == "/" {
+            if owned_input == "/" {
                 show_command_menu();
                 continue;
             }
 
             // Special case: /help command
-            if input == "/help" || input == "/h" || input == "/?" {
+            if owned_input == "/help" || owned_input == "/h" || owned_input == "/?" {
                 show_help();
                 continue;
             }
 
             // Special case: /model command to change model with completion
-            if input.starts_with("/model ") {
-                let new_model = input.strip_prefix("/model ").unwrap().trim();
+            if let Some(model_arg) = owned_input.strip_prefix("/model ") {
+                let new_model = model_arg.trim();
                 if !new_model.is_empty() {
                     // Check if model is available
                     if is_model_available(new_model) {
@@ -1649,15 +1653,17 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                         status_indicator.refresh_gpu_status();
                         println!("{} Switched to model: {}", "[+]".green(), model.bright_white());
                     } else {
-                        println!("{} Model '{}' not found. Use Tab to see available models.", "[!]".yellow(), new_model);
+                        println!("{} Model '{}' not found.", "[!]".yellow(), new_model);
+                        println!("    {}", "Tip: Use Tab to see available models, or pull with:".bright_black());
+                        println!("    {}", format!("ollama pull {}", new_model).bright_cyan());
                     }
                     continue;
                 }
             }
 
             // Special case: /mode command to change routing mode
-            if input.starts_with("/mode ") {
-                let new_mode = input.strip_prefix("/mode ").unwrap().trim().to_lowercase();
+            if let Some(mode_arg) = owned_input.strip_prefix("/mode ") {
+                let new_mode = mode_arg.trim().to_lowercase();
                 match OperatingMode::from_str(&new_mode) {
                     Some(mode) => {
                         status_indicator.set_mode(mode);
@@ -1676,11 +1682,25 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 continue;
             }
 
+            // Special case: /retry command to resend last failed message
+            if owned_input == "/retry" || owned_input == "/r!" {
+                if let Some(failed_msg) = last_failed_message.take() {
+                    println!("{} Retrying last message...", "[i]".bright_blue());
+                    // Set input to the failed message
+                    owned_input = failed_msg;
+                    // Fall through to process the message (not a slash command anymore)
+                } else {
+                    println!("{} No failed message to retry.", "[!]".yellow());
+                    println!("    {}", "Tip: /retry resends your last message that failed to send.".bright_black());
+                    continue;
+                }
+            }
+
             // Update status indicator stats before handling command
             status_indicator.update_stats(conversation.len() as u32, 0);
 
             let result = handle_slash_command(
-                input,
+                &owned_input,
                 &conversation,
                 &model,
                 &store,
@@ -1758,7 +1778,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         }
 
         // Handle /new and /clear - clear the conversation
-        if input.eq_ignore_ascii_case("/new") || input.eq_ignore_ascii_case("/clear") {
+        if owned_input.eq_ignore_ascii_case("/new") || owned_input.eq_ignore_ascii_case("/clear") {
             conversation.clear();
             current_conversation_id = None;
             println!("\n  Starting new conversation. Previous messages cleared.\n");
@@ -1766,7 +1786,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         }
 
         // Process @ mentions for context inclusion
-        let (expanded_input, context_messages) = rigrun::process_mentions(input);
+        let (expanded_input, context_messages) = rigrun::process_mentions(&owned_input);
 
         // Display what context was included
         for msg in &context_messages {
@@ -1827,6 +1847,9 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                     rigrun::store_last_error(&format!("{}", e));
                     println!("\r{}\r", " ".repeat(12)); // Clear thinking indicator
                     eprintln!("{} {}", "[Error]".red(), e);
+                    // Store the failed message for /retry
+                    last_failed_message = Some(owned_input.clone());
+                    println!("    {}", "Tip: Use /retry to resend this message.".bright_black());
                     // Remove the failed user message from conversation
                     conversation.pop();
                     continue;
@@ -1842,17 +1865,20 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         // Add assistant response to conversation (even partial if interrupted)
         if !response.response.is_empty() {
             conversation.push(Message::assistant(response.response.clone()));
+            // Clear any failed message on success
+            last_failed_message = None;
         } else if !accumulated_response.is_empty() {
             // Use accumulated response for interrupted stream
             conversation.push(Message::assistant(accumulated_response.clone()));
+            last_failed_message = None;
         } else {
             // Empty response, remove the user message
             conversation.pop();
         }
 
-        // Show stats with TTFT (only if not cancelled)
+        // Show stats
+        let elapsed = start.elapsed();
         if !was_cancelled {
-            let elapsed = start.elapsed();
             let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 && response.completion_tokens > 0 {
                 response.completion_tokens as f64 / elapsed.as_secs_f64()
             } else {
@@ -1867,7 +1893,15 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 time_to_first_token.to_string().bright_green()
             );
         } else {
-            println!(); // Just add a newline after interrupted stream
+            // Show partial stats for interrupted stream
+            let word_count = accumulated_response.split_whitespace().count();
+            println!(
+                "{} {} | ~{} words | TTFT: {}ms\n",
+                "─↴─".bright_black(),
+                "partial".yellow(),
+                word_count,
+                if first_token_received { time_to_first_token.to_string() } else { "-".to_string() }
+            );
         }
     }
 
@@ -3328,7 +3362,8 @@ fn main() -> Result<()> {
             }
         }
         Some(Commands::Cache { command }) => {
-            handle_cache(command)?;
+            // Default to Stats if no subcommand provided
+            handle_cache(command.unwrap_or(CacheCommands::Stats))?;
         }
         Some(Commands::Models) => {
             list_models()?;

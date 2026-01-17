@@ -561,10 +561,67 @@ pub fn handle_slash_command(
 
         _ => {
             println!("\n  Unknown command: /{}", command);
+            // Suggest similar commands
+            let known_commands = ["help", "h", "save", "s", "resume", "r", "history", "list", "ls",
+                                  "delete", "del", "rm", "autosave", "auto", "new", "clear",
+                                  "exit", "quit", "q", "status", "stat", "model", "m", "mode", "retry"];
+            if let Some(suggestion) = find_similar_command(&command, &known_commands) {
+                println!("  Did you mean: {}?", format!("/{}", suggestion).bright_cyan());
+            }
             println!("  Type /help for available commands.\n");
             Ok(CommandResult::Handled)
         }
     }
+}
+
+/// Find the most similar command using simple edit distance
+fn find_similar_command<'a>(input: &str, commands: &[&'a str]) -> Option<&'a str> {
+    let input_lower = input.to_lowercase();
+    let mut best_match: Option<&str> = None;
+    let mut best_distance = usize::MAX;
+
+    for &cmd in commands {
+        let distance = levenshtein_distance(&input_lower, cmd);
+        // Only suggest if distance is reasonable (less than half the command length + 2)
+        if distance < best_distance && distance <= (cmd.len() / 2 + 2) {
+            best_distance = distance;
+            best_match = Some(cmd);
+        }
+    }
+
+    // Only return a match if it's reasonably close
+    if best_distance <= 3 {
+        best_match
+    } else {
+        None
+    }
+}
+
+/// Calculate Levenshtein edit distance between two strings
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let m = a_chars.len();
+    let n = b_chars.len();
+
+    if m == 0 { return n; }
+    if n == 0 { return m; }
+
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+
+    for i in 0..=m { dp[i][0] = i; }
+    for j in 0..=n { dp[0][j] = j; }
+
+    for i in 1..=m {
+        for j in 1..=n {
+            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            dp[i][j] = (dp[i - 1][j] + 1)
+                .min(dp[i][j - 1] + 1)
+                .min(dp[i - 1][j - 1] + cost);
+        }
+    }
+
+    dp[m][n]
 }
 
 /// Print help for slash commands
@@ -581,6 +638,7 @@ fn print_help() {
     println!("    /status, /stat     Show current status (model, GPU, session)");
     println!("    /model, /m         Show/change current model");
     println!("    /mode              Show/change routing mode (local/cloud/auto/hybrid)");
+    println!("    /retry, /r!        Resend last failed message");
     println!("    /help, /h, /?      Show this help message");
     println!("    /exit, /quit, /q   Exit the chat");
     println!();
@@ -590,6 +648,7 @@ fn print_help() {
     println!("    - Enable /autosave to never lose your work");
     println!("    - Use /status to check GPU and session info");
     println!("    - Press Ctrl+C during response to interrupt");
+    println!("    - Use /retry after an error to resend your message");
     println!();
 }
 
