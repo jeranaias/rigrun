@@ -694,7 +694,25 @@ fn is_rigrun_process(pid: u32) -> bool {
 
 async fn start_server(config: &Config) -> Result<()> {
     let mut port = config.port.unwrap_or(DEFAULT_PORT);
-    let gpu = detect_gpu().unwrap_or_default();
+
+    // GPU detection with timeout to prevent startup hang
+    print!("{DIM}Detecting GPU...{RESET}");
+    std::io::Write::flush(&mut std::io::stdout()).ok();
+
+    let gpu = match tokio::time::timeout(
+        tokio::time::Duration::from_secs(5),
+        tokio::task::spawn_blocking(detect_gpu)
+    ).await {
+        Ok(Ok(Ok(gpu_info))) => {
+            println!("\r{GREEN}[✓]{RESET} GPU: {} ({} GB VRAM)       ", gpu_info.name, gpu_info.vram_gb);
+            gpu_info
+        }
+        Ok(Ok(Err(_))) | Ok(Err(_)) | Err(_) => {
+            println!("\r{YELLOW}[!]{RESET} GPU detection slow/failed, using defaults       ");
+            GpuInfo::default()
+        }
+    };
+
     let model = config
         .model
         .clone()

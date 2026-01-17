@@ -449,6 +449,26 @@ impl HealthChecker {
                         }
                     }
 
+                    // GPU is "in use" if it's detected AND properly configured
+                    // (not just if models are currently loaded)
+                    let gpu_ready = match gpu_info.gpu_type {
+                        GpuType::Nvidia => true, // NVIDIA generally works out of the box
+                        GpuType::Amd => {
+                            // RDNA 4 needs Vulkan, others need ROCm
+                            let arch = detect_amd_architecture(&gpu_info.name);
+                            if arch == AmdArchitecture::Rdna4 {
+                                std::env::var("OLLAMA_VULKAN").ok().as_deref() == Some("1")
+                            } else {
+                                true // Assume ROCm works for older AMD
+                            }
+                        }
+                        GpuType::AppleSilicon => true,
+                        GpuType::Intel => true,
+                        GpuType::Cpu => false,
+                    };
+
+                    status.gpu_in_use = gpu_ready;
+
                     // Check if loaded models are using GPU
                     let loaded_models = get_ollama_loaded_models();
                     let any_on_gpu = loaded_models.iter().any(|m| {
@@ -459,8 +479,6 @@ impl HealthChecker {
                     let any_on_cpu = loaded_models.iter().any(|m| {
                         matches!(m.processor, ProcessorType::Cpu)
                     });
-
-                    status.gpu_in_use = any_on_gpu;
 
                     if any_on_cpu && !loaded_models.is_empty() {
                         for model in &loaded_models {

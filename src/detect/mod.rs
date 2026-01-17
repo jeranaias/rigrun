@@ -502,12 +502,13 @@ try {
         .or(wmi_vram)
         .unwrap_or(8); // Default to 8GB if all methods fail
 
-    // Validation: If WMI returned exactly 4GB for a high-end GPU, it's likely wrong
+    // Validation: If WMI returned 4GB or less for a high-end GPU, it's likely wrong
+    // WMI AdapterRAM is 32-bit, overflows to ~4095MB for GPUs >4GB
     // Check if we have an inferred value that's higher
-    if vram_gb == 4 {
+    if vram_gb <= 4 {
         if let Some(inferred) = infer_amd_vram_from_model(&gpu_name) {
-            if inferred > 4 {
-                // High-end GPU detected, WMI is showing 32-bit limitation
+            if inferred > vram_gb {
+                // High-end GPU detected, WMI is showing 32-bit overflow limitation
                 vram_gb = inferred;
             }
         }
