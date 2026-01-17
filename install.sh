@@ -203,7 +203,7 @@ fi
 # Check for Ollama
 echo ""
 if ! command -v ollama > /dev/null 2>&1; then
-    echo "  \033[33m[!] Ollama not found (required for local inference)\033[0m"
+    echo "  \033[33m⚠ Ollama not found (required for local inference)\033[0m"
     echo ""
     printf "  Install Ollama now? (Y/n) "
     read -r INSTALL_OLLAMA

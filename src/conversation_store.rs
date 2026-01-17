@@ -22,7 +22,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use rigrun::types::Message;
-use rigrun::status_indicator::{StatusIndicator, OperatingMode};
+use rigrun::status_indicator::{StatusIndicator, OperatingMode, StatusLineStyle};
 
 /// Maximum length for conversation summaries
 const MAX_SUMMARY_LENGTH: usize = 60;
@@ -280,6 +280,8 @@ pub enum CommandResult {
     Exit,
     /// Resume a conversation (returns the conversation)
     Resume(SavedConversation),
+    /// Change status bar style (returns the new style)
+    SetStatusBarStyle(StatusLineStyle),
 }
 
 /// Parse and handle slash commands in the chat
@@ -310,6 +312,11 @@ pub fn handle_slash_command(
     match command.as_str() {
         "help" | "h" | "?" => {
             print_help();
+            Ok(CommandResult::Handled)
+        }
+
+        "tips" => {
+            print_quick_tips();
             Ok(CommandResult::Handled)
         }
 
@@ -476,7 +483,7 @@ pub fn handle_slash_command(
             Ok(CommandResult::Handled)
         }
 
-        "new" | "clear" => {
+        "new" | "clear" | "reset" => {
             *current_conversation_id = None;
             println!("\n  Starting new conversation. Previous messages cleared.\n");
             Ok(CommandResult::Handled)
@@ -505,7 +512,7 @@ pub fn handle_slash_command(
             if args.is_empty() {
                 // Show current model
                 println!();
-                println!("  Current model: {}", model.bright_white().bold());
+                println!("  Current model: {}", model.bold().bold());
                 println!();
                 println!("  To change model, use: /model <model_name>");
                 println!("  Example: /model qwen2.5-coder:7b");
@@ -517,7 +524,7 @@ pub fn handle_slash_command(
                         println!("  Available models:");
                         for m in models.iter().take(10) {
                             let indicator = if m == model { " (active)" } else { "" };
-                            println!("    - {}{}", m, indicator.bright_green());
+                            println!("    - {}{}", m, indicator.green());
                         }
                         if models.len() > 10 {
                             println!("    ... and {} more", models.len() - 10);
@@ -529,7 +536,7 @@ pub fn handle_slash_command(
                 // Note: Actual model switching would need to return a signal
                 // to the main loop to change the model variable
                 println!();
-                println!("  {}", "[!] Model switching during session is not yet supported.".yellow());
+                println!("  {}", "⚠ Model switching during session is not yet supported.".yellow());
                 println!("  Exit and restart with: rigrun chat --model {}", args[0]);
                 println!();
             }
@@ -545,13 +552,13 @@ pub fn handle_slash_command(
             };
 
             println!();
-            println!("  Current mode: {}", current_mode.bright_white().bold());
+            println!("  Current mode: {}", current_mode.bold().bold());
             println!();
             println!("  Available modes:");
             println!("    {} - All queries processed locally via Ollama", "local".green());
             println!("    {} - All queries routed to cloud providers", "cloud".yellow());
             println!("    {}  - Local first, cloud fallback if needed", "auto".cyan());
-            println!("    {} - Intelligent routing based on query complexity", "hybrid".bright_blue());
+            println!("    {} - Intelligent routing based on query complexity", "hybrid".cyan());
             println!();
             println!("  To change mode, use: /mode <mode_name>");
             println!("  Example: /mode auto");
@@ -559,14 +566,64 @@ pub fn handle_slash_command(
             Ok(CommandResult::Handled)
         }
 
+        "statusbar" | "sb" => {
+            // Get current style
+            let current_style = if let Some(indicator) = status_indicator {
+                indicator.style()
+            } else {
+                StatusLineStyle::Compact
+            };
+
+            if args.is_empty() {
+                // Toggle to next style
+                let new_style = current_style.next();
+                println!();
+                println!("  {} Status bar: {} -> {}", "\u{2713}".green(), format!("{:?}", current_style).bright_black(), format!("{:?}", new_style).bold());
+                println!("  {}", new_style.description().bright_black());
+                println!();
+                return Ok(CommandResult::SetStatusBarStyle(new_style));
+            }
+
+            // Parse the argument as a style
+            let style_arg = args[0].to_lowercase();
+            match StatusLineStyle::from_str(&style_arg) {
+                Some(new_style) => {
+                    println!();
+                    println!("  {} Status bar: {}", "\u{2713}".green(), format!("{:?}", new_style).bold());
+                    println!("  {}", new_style.description().bright_black());
+                    println!();
+                    return Ok(CommandResult::SetStatusBarStyle(new_style));
+                }
+                None => {
+                    println!();
+                    println!("  {} Unknown style: {}", "\u{26A0}".yellow(), style_arg);
+                    println!();
+                    println!("  Current: {:?} - {}", current_style, current_style.description());
+                    println!();
+                    println!("  Available styles:");
+                    println!("    {} - Fixed bar at top (updates in place)", "fixed".cyan());
+                    println!("    {} - Inline status in prompt (default)", "compact".cyan());
+                    println!("    {} - Minimal inline status", "minimal".cyan());
+                    println!("    {}  - Full box-style status", "full".cyan());
+                    println!("    {}   - Hide status bar", "off".cyan());
+                    println!();
+                    println!("  Usage: /statusbar [fixed|compact|minimal|full|off]");
+                    println!("  Toggle: /statusbar (cycles through styles)");
+                    println!();
+                }
+            }
+            Ok(CommandResult::Handled)
+        }
+
         _ => {
             println!("\n  Unknown command: /{}", command);
             // Suggest similar commands
             let known_commands = ["help", "h", "save", "s", "resume", "r", "history", "list", "ls",
-                                  "delete", "del", "rm", "autosave", "auto", "new", "clear",
-                                  "exit", "quit", "q", "status", "stat", "model", "m", "mode", "retry"];
+                                  "delete", "del", "rm", "autosave", "auto", "new", "clear", "reset",
+                                  "exit", "quit", "q", "status", "stat", "model", "m", "mode", "retry",
+                                  "statusbar", "sb"];
             if let Some(suggestion) = find_similar_command(&command, &known_commands) {
-                println!("  Did you mean: {}?", format!("/{}", suggestion).bright_cyan());
+                println!("  Did you mean: {}?", format!("/{}", suggestion).cyan());
             }
             println!("  Type /help for available commands.\n");
             Ok(CommandResult::Handled)
@@ -633,12 +690,15 @@ fn print_help() {
     println!("    /resume, /r [n]    Resume a saved conversation");
     println!("    /history, /ls      List all saved conversations");
     println!("    /delete, /rm [n]   Delete a saved conversation");
-    println!("    /new, /clear       Start a new conversation");
+    println!("    /new, /clear, /reset Start a new conversation");
     println!("    /autosave, /auto   Toggle auto-save on exit");
     println!("    /status, /stat     Show current status (model, GPU, session)");
+    println!("    /statusbar, /sb    Toggle/set status bar style");
+    println!("                       (fixed, compact, minimal, full, off)");
     println!("    /model, /m         Show/change current model");
     println!("    /mode              Show/change routing mode (local/cloud/auto/hybrid)");
     println!("    /retry, /r!        Resend last failed message");
+    println!("    /tips              Show quick tips for new users");
     println!("    /help, /h, /?      Show this help message");
     println!("    /exit, /quit, /q   Exit the chat");
     println!();
@@ -647,8 +707,21 @@ fn print_help() {
     println!("    - Use /resume to continue where you left off");
     println!("    - Enable /autosave to never lose your work");
     println!("    - Use /status to check GPU and session info");
+    println!("    - Use /statusbar fixed for a persistent status bar at top");
     println!("    - Press Ctrl+C during response to interrupt");
     println!("    - Use /retry after an error to resend your message");
+    println!();
+}
+
+/// Print quick tips for new users
+fn print_quick_tips() {
+    println!();
+    println!("  {}", "Quick tips:".cyan().bold());
+    println!("    {} Type naturally - rigrun routes to the best model", "•".dimmed());
+    println!("    {} Use {} to see commands, {} for help", "•".dimmed(), "/".cyan(), "/help".cyan());
+    println!("    {} Press {} to interrupt a response", "•".dimmed(), "Ctrl+C".yellow());
+    println!("    {} Your data stays local by default", "•".dimmed());
+    println!("    {} Use {} to access conversations across sessions", "•".dimmed(), "/resume".cyan());
     println!();
 }
 

@@ -103,6 +103,8 @@ fn get_hostname() -> Option<String> {
 }
 
 /// Get the consent log file path
+/// This function is part of the public API for future audit log access and reporting
+#[allow(dead_code)]
 pub fn consent_log_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))

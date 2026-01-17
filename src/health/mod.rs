@@ -127,9 +127,9 @@ impl HealthIssue {
 impl std::fmt::Display for HealthIssue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let icon = match self.severity {
-            Severity::Critical => "[X]",
-            Severity::Warning => "[!]",
-            Severity::Info => "[i]",
+            Severity::Critical => "✗",
+            Severity::Warning => "⚠",
+            Severity::Info => "ℹ",
         };
         write!(f, "{} {}: {}", icon, self.component, self.message)
     }
@@ -934,30 +934,30 @@ pub fn format_health_status(status: &HealthStatus) -> String {
     // Ollama status
     if status.ollama_running {
         let version = status.ollama_version.as_deref().unwrap_or("unknown");
-        output.push_str(&format!("[OK] Ollama: Running (v{})\n", version));
+        output.push_str(&format!("✓ Ollama: Running (v{})\n", version));
     } else {
-        output.push_str("[X] Ollama: Not running\n");
+        output.push_str("✗ Ollama: Not running\n");
     }
 
     // Model status
     if let Some(ref model) = status.model_name {
         if status.model_loaded {
-            output.push_str(&format!("[OK] Model: {} loaded\n", model));
+            output.push_str(&format!("✓ Model: {} loaded\n", model));
         } else if status.model_downloaded {
-            output.push_str(&format!("[OK] Model: {} available (not loaded)\n", model));
+            output.push_str(&format!("✓ Model: {} available (not loaded)\n", model));
         } else {
-            output.push_str(&format!("[X] Model: {} not downloaded\n", model));
+            output.push_str(&format!("✗ Model: {} not downloaded\n", model));
         }
     } else {
-        output.push_str("[!] Model: None configured\n");
+        output.push_str("⚠ Model: None configured\n");
     }
 
     // GPU status
     if let Some(ref gpu) = status.gpu_info {
         if status.gpu_in_use {
-            output.push_str(&format!("[OK] GPU: {} ({}GB)\n", gpu.name, gpu.vram_gb));
+            output.push_str(&format!("✓ GPU: {} ({}GB)\n", gpu.name, gpu.vram_gb));
         } else {
-            output.push_str(&format!("[!] GPU: {} (not in use)\n", gpu.name));
+            output.push_str(&format!("⚠ GPU: {} (not in use)\n", gpu.name));
         }
 
         if let (Some(used), Some(total)) = (status.vram_used_mb, status.vram_available_mb.map(|a| a + status.vram_used_mb.unwrap_or(0))) {
@@ -965,31 +965,31 @@ pub fn format_health_status(status: &HealthStatus) -> String {
             output.push_str(&format!("    VRAM: {:.1}% used ({}MB/{}MB)\n", percent, used, total));
         }
     } else if !status.gpu_detected {
-        output.push_str("[!] GPU: None detected (CPU mode)\n");
+        output.push_str("⚠ GPU: None detected (CPU mode)\n");
     }
 
     // Config status
     if status.config_valid {
-        output.push_str("[OK] Config: Valid\n");
+        output.push_str("✓ Config: Valid\n");
     } else {
-        output.push_str("[X] Config: Invalid\n");
+        output.push_str("✗ Config: Invalid\n");
     }
 
     // Disk space
     if let Some(space) = status.disk_space_gb {
         if space >= MIN_DISK_SPACE_GB {
-            output.push_str(&format!("[OK] Disk: {}GB available\n", space));
+            output.push_str(&format!("✓ Disk: {}GB available\n", space));
         } else {
-            output.push_str(&format!("[!] Disk: {}GB available (low)\n", space));
+            output.push_str(&format!("⚠ Disk: {}GB available (low)\n", space));
         }
     }
 
     // Network
     if let Some(available) = status.network_available {
         if available {
-            output.push_str("[OK] Network: Cloud APIs reachable\n");
+            output.push_str("✓ Network: Cloud APIs reachable\n");
         } else {
-            output.push_str("[!] Network: Cloud APIs unreachable\n");
+            output.push_str("⚠ Network: Cloud APIs unreachable\n");
         }
     }
 
@@ -1005,9 +1005,9 @@ pub fn format_health_status(status: &HealthStatus) -> String {
         output.push_str("\nIssues:\n");
         for issue in &status.issues {
             let icon = match issue.severity {
-                Severity::Critical => "[X]",
-                Severity::Warning => "[!]",
-                Severity::Info => "[i]",
+                Severity::Critical => "✗",
+                Severity::Warning => "⚠",
+                Severity::Info => "ℹ",
             };
             output.push_str(&format!("{} {}: {}\n", icon, issue.component, issue.message));
             output.push_str(&format!("    Fix: {}\n", issue.fix));
@@ -1048,13 +1048,13 @@ pub enum StartupHealthResult {
 ///     }
 ///     StartupHealthResult::Warnings(warnings) => {
 ///         for w in &warnings {
-///             eprintln!("[!] {}: {}", w.component, w.message);
+///             eprintln!("⚠ {}: {}", w.component, w.message);
 ///         }
 ///         println!("Starting with warnings...");
 ///     }
 ///     StartupHealthResult::Critical(errors) => {
 ///         for e in &errors {
-///             eprintln!("[X] {}: {}", e.component, e.message);
+///             eprintln!("✗ {}: {}", e.component, e.message);
 ///             eprintln!("    Fix: {}", e.fix);
 ///         }
 ///         std::process::exit(1);
@@ -1094,7 +1094,7 @@ pub fn print_startup_warnings(warnings: &[HealthIssue]) {
     eprintln!();
     eprintln!("Startup warnings:");
     for w in warnings {
-        eprintln!("  [!] {}: {}", w.component, w.message);
+        eprintln!("  ⚠ {}: {}", w.component, w.message);
         eprintln!("      Fix: {}", w.fix);
     }
     eprintln!();
@@ -1109,7 +1109,7 @@ pub fn print_critical_and_exit(errors: &[HealthIssue]) -> ! {
     eprintln!("Critical errors - cannot start rigrun:");
     eprintln!();
     for e in errors {
-        eprintln!("  [X] {}: {}", e.component, e.message);
+        eprintln!("  ✗ {}: {}", e.component, e.message);
         eprintln!("      Fix: {}", e.fix);
         eprintln!();
     }

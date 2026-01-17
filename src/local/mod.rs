@@ -95,10 +95,27 @@ impl std::fmt::Display for OllamaError {
                 write!(f, "{}", error)
             }
             Self::ModelNotFound(model) => {
-                let error = format!(
-                    "[✗] Model not found: {}\n\nPossible causes:\n  - Model not downloaded yet\n  - Model name misspelled\n  - Model deleted from local storage\n\nTry these fixes:\n  1. Pull the model: ollama pull {}\n  2. List available models: ollama list\n  3. Check model name spelling\n  4. Pull a popular model: ollama pull qwen2.5-coder:7b\n\nNeed help? https://github.com/jeranaias/rigrun/issues",
-                    model, model
+                let mut error = format!(
+                    "[✗] Model not found: {}\n\nPossible causes:\n  - Model not downloaded yet\n  - Model name misspelled\n  - Model deleted from local storage",
+                    model
                 );
+
+                // Try to list available models for inline suggestion
+                if let Ok(available) = list_models() {
+                    if !available.is_empty() {
+                        error.push_str("\n\nAvailable models:");
+                        for available_model in available.iter().take(5) {
+                            error.push_str(&format!("\n  - {}", available_model));
+                        }
+                        if available.len() > 5 {
+                            error.push_str(&format!("\n  ... and {} more (use: ollama list)", available.len() - 5));
+                        }
+                    }
+                }
+
+                error.push_str("\n\nTry these fixes:\n  1. Pull the model: ollama pull ");
+                error.push_str(model);
+                error.push_str("\n  2. List all models: ollama list\n  3. Check model name spelling\n\nNeed help? https://github.com/jeranaias/rigrun/issues");
                 write!(f, "{}", error)
             }
             Self::ApiError(msg) => {

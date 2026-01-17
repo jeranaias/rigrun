@@ -214,10 +214,10 @@ fn hardware_detection_and_model_selection(use_case: UseCase) -> Result<ModelSele
 
     // Display detected hardware
     if gpu.gpu_type == GpuType::Cpu {
-        println!("{YELLOW}[!]{RESET} {WHITE}No GPU detected - CPU mode{RESET}");
+        println!("{YELLOW}⚠{RESET} {WHITE}No GPU detected - CPU mode{RESET}");
         println!("    {DIM}Performance will be slower without GPU acceleration{RESET}");
     } else {
-        println!("{GREEN}[+]{RESET} {WHITE}We detected: {BOLD}{}{RESET} ({CYAN}{}GB VRAM{RESET})",
+        println!("{GREEN}✓{RESET} {WHITE}We detected: {BOLD}{}{RESET} ({CYAN}{}GB VRAM{RESET})",
             gpu.name, gpu.vram_gb);
         if let Some(ref driver) = gpu.driver {
             println!("    {DIM}Driver: {}{RESET}", driver);
@@ -398,7 +398,7 @@ fn prompt_openrouter_key(mode: DeploymentMode) -> Result<Option<String>> {
 
     if !setup_now {
         println!();
-        println!("{YELLOW}[!]{RESET} Skipped. You can set this up later with:");
+        println!("{YELLOW}⚠{RESET} Skipped. You can set this up later with:");
         println!("    {CYAN}rigrun config set-key YOUR_KEY{RESET}");
         return Ok(None);
     }
@@ -418,7 +418,7 @@ fn prompt_openrouter_key(mode: DeploymentMode) -> Result<Option<String>> {
 
     // Validate key format
     if !key.starts_with("sk-or-") {
-        println!("{YELLOW}[!]{RESET} Warning: Key doesn't start with 'sk-or-'. It may not be valid.");
+        println!("{YELLOW}⚠{RESET} Warning: Key doesn't start with 'sk-or-'. It may not be valid.");
     }
 
     Ok(Some(key.to_string()))
@@ -458,12 +458,12 @@ pub fn download_model_with_progress(model: &str) -> Result<()> {
 
     // Check if already downloaded
     if is_model_available(model) {
-        println!("{GREEN}[+]{RESET} Model {WHITE}{BOLD}{model}{RESET} already downloaded");
+        println!("{GREEN}✓{RESET} Model {WHITE}{BOLD}{model}{RESET} already downloaded");
         return Ok(());
     }
 
     println!();
-    println!("{CYAN}[...]{RESET} Downloading {WHITE}{BOLD}{model}{RESET}...");
+    println!("{CYAN}⋯{RESET} Downloading {WHITE}{BOLD}{model}{RESET}...");
     println!("{DIM}This is a one-time download. Future starts are instant.{RESET}");
     println!();
 
@@ -522,19 +522,19 @@ pub fn download_model_with_progress(model: &str) -> Result<()> {
 
     match result {
         Ok(()) => {
-            println!("{GREEN}[+]{RESET} Model {WHITE}{BOLD}{model}{RESET} downloaded successfully!");
+            println!("{GREEN}✓{RESET} Model {WHITE}{BOLD}{model}{RESET} downloaded successfully!");
             Ok(())
         }
         Err(e) => {
             let err_str = e.to_string();
             if err_str.contains("Cannot connect") || err_str.contains("not running") {
-                println!("{RED}[X]{RESET} Ollama not running. Start it with: {CYAN}ollama serve{RESET}");
+                println!("{RED}✗{RESET} Ollama not running. Start it with: {CYAN}ollama serve{RESET}");
                 Err(e)
             } else if err_str.contains("not found") {
-                println!("{RED}[X]{RESET} Model not found: {WHITE}{model}{RESET}");
+                println!("{RED}✗{RESET} Model not found: {WHITE}{model}{RESET}");
                 Err(e)
             } else {
-                println!("{RED}[X]{RESET} Download failed: {}", e);
+                println!("{RED}✗{RESET} Download failed: {}", e);
                 Err(e)
             }
         }
@@ -554,9 +554,9 @@ pub fn run_health_check(model: &Option<String>) -> Result<bool> {
     io::stdout().flush().ok();
 
     if crate::detect::check_ollama_available() {
-        println!("\r  {GREEN}[+]{RESET} Ollama is installed                    ");
+        println!("\r  {GREEN}✓{RESET} Ollama is installed                    ");
     } else {
-        println!("\r  {RED}[X]{RESET} Ollama not found                        ");
+        println!("\r  {RED}✗{RESET} Ollama not found                        ");
         println!("      {DIM}Install from: https://ollama.ai/download{RESET}");
         all_passed = false;
     }
@@ -567,9 +567,9 @@ pub fn run_health_check(model: &Option<String>) -> Result<bool> {
 
     let client = OllamaClient::new();
     if client.check_ollama_running() {
-        println!("\r  {GREEN}[+]{RESET} Ollama service is running               ");
+        println!("\r  {GREEN}✓{RESET} Ollama service is running               ");
     } else {
-        println!("\r  {YELLOW}[!]{RESET} Ollama service not running             ");
+        println!("\r  {YELLOW}⚠{RESET} Ollama service not running             ");
         println!("      {DIM}Start with: ollama serve{RESET}");
         all_passed = false;
     }
@@ -580,9 +580,9 @@ pub fn run_health_check(model: &Option<String>) -> Result<bool> {
 
     let gpu = detect_gpu().unwrap_or_default();
     if gpu.gpu_type != GpuType::Cpu {
-        println!("\r  {GREEN}[+]{RESET} GPU detected: {} ({}GB)              ", gpu.name, gpu.vram_gb);
+        println!("\r  {GREEN}✓{RESET} GPU detected: {} ({}GB)              ", gpu.name, gpu.vram_gb);
     } else {
-        println!("\r  {YELLOW}[!]{RESET} No GPU detected (CPU mode)             ");
+        println!("\r  {YELLOW}⚠{RESET} No GPU detected (CPU mode)             ");
     }
 
     // Check 4: Model availability
@@ -591,9 +591,9 @@ pub fn run_health_check(model: &Option<String>) -> Result<bool> {
         io::stdout().flush().ok();
 
         if crate::detect::is_model_available(model_name) {
-            println!("\r  {GREEN}[+]{RESET} Model {} available               ", model_name);
+            println!("\r  {GREEN}✓{RESET} Model {} available               ", model_name);
         } else {
-            println!("\r  {YELLOW}[!]{RESET} Model {} not found              ", model_name);
+            println!("\r  {YELLOW}⚠{RESET} Model {} not found              ", model_name);
             all_passed = false;
         }
     }
@@ -607,17 +607,17 @@ pub fn run_health_check(model: &Option<String>) -> Result<bool> {
         .unwrap_or_else(|| PathBuf::from(".rigrun"));
 
     if config_dir.join("config.json").exists() {
-        println!("\r  {GREEN}[+]{RESET} Configuration file exists               ");
+        println!("\r  {GREEN}✓{RESET} Configuration file exists               ");
     } else {
-        println!("\r  {YELLOW}[!]{RESET} No configuration file found            ");
+        println!("\r  {YELLOW}⚠{RESET} No configuration file found            ");
     }
 
     println!();
 
     if all_passed {
-        println!("{GREEN}{BOLD}[+] All checks passed! rigrun is ready.{RESET}");
+        println!("{GREEN}{BOLD}✓ All checks passed! rigrun is ready.{RESET}");
     } else {
-        println!("{YELLOW}{BOLD}[!] Some checks failed. See above for details.{RESET}");
+        println!("{YELLOW}{BOLD}⚠ Some checks failed. See above for details.{RESET}");
     }
 
     Ok(all_passed)
@@ -666,14 +666,14 @@ pub fn generate_config(wizard_config: &WizardConfig) -> Result<()> {
     let content = serde_json::to_string_pretty(&config)?;
     fs::write(&config_path, content)?;
 
-    println!("{GREEN}[+]{RESET} Configuration saved to {}", config_path.display());
+    println!("{GREEN}✓{RESET} Configuration saved to {}", config_path.display());
 
     // Generate TOML config if secure config requested
     if wizard_config.generate_secure_config {
         let toml_config = generate_toml_config(wizard_config);
         let toml_path = config_dir.join("config.toml");
         fs::write(&toml_path, toml_config)?;
-        println!("{GREEN}[+]{RESET} Secure configuration saved to {}", toml_path.display());
+        println!("{GREEN}✓{RESET} Secure configuration saved to {}", toml_path.display());
     }
 
     Ok(())
@@ -799,7 +799,7 @@ fn show_completion_summary(wizard_config: &WizardConfig, health_passed: bool) {
     println!();
 
     if !health_passed {
-        println!("{YELLOW}[!]{RESET} Some health checks failed. Run {CYAN}rigrun doctor{RESET} for details.");
+        println!("{YELLOW}⚠{RESET} Some health checks failed. Run {CYAN}rigrun doctor{RESET} for details.");
         println!();
     }
 
@@ -860,7 +860,7 @@ pub async fn run_wizard() -> Result<WizardConfig> {
     // Download model if selected
     if let Some(ref model) = selected_model {
         if let Err(e) = download_model_with_progress(model) {
-            println!("{YELLOW}[!]{RESET} Model download failed: {}", e);
+            println!("{YELLOW}⚠{RESET} Model download failed: {}", e);
             println!("    {DIM}You can download later with: rigrun pull {}{RESET}", model);
         }
     }
@@ -891,15 +891,15 @@ pub async fn run_quick_wizard() -> Result<WizardConfig> {
     // Auto-detect hardware
     let gpu = detect_gpu().unwrap_or_default();
     if gpu.gpu_type != GpuType::Cpu {
-        println!("{GREEN}[+]{RESET} Detected: {} ({}GB VRAM)", gpu.name, gpu.vram_gb);
+        println!("{GREEN}✓{RESET} Detected: {} ({}GB VRAM)", gpu.name, gpu.vram_gb);
     } else {
-        println!("{YELLOW}[!]{RESET} No GPU detected - using CPU mode");
+        println!("{YELLOW}⚠{RESET} No GPU detected - using CPU mode");
     }
 
     // Use recommended model
     let model = recommend_model(gpu.vram_gb);
     wizard_config.model = Some(model.clone());
-    println!("{GREEN}[+]{RESET} Recommended model: {}", model);
+    println!("{GREEN}✓{RESET} Recommended model: {}", model);
 
     // Use defaults
     wizard_config.deployment_mode = DeploymentMode::LocalOnly;
@@ -907,14 +907,14 @@ pub async fn run_quick_wizard() -> Result<WizardConfig> {
     wizard_config.generate_secure_config = true;
 
     println!();
-    println!("{CYAN}[...]{RESET} Setting up...");
+    println!("{CYAN}⋯{RESET} Setting up...");
 
     // Generate config
     generate_config(&wizard_config)?;
 
     // Download model
     if let Err(e) = download_model_with_progress(&model) {
-        println!("{YELLOW}[!]{RESET} Model download failed: {}", e);
+        println!("{YELLOW}⚠{RESET} Model download failed: {}", e);
     }
 
     // Mark complete

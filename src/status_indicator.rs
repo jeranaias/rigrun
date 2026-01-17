@@ -100,6 +100,16 @@ pub enum StatusLineStyle {
     /// [local|GPU]
     /// ```
     Minimal,
+    /// Fixed position status bar at top of terminal
+    /// ```text
+    /// +---------------------------------------------------------------------+
+    /// | qwen2.5-coder:7b | [LOCAL] | GPU active | 14:32 remaining | /help   |
+    /// +---------------------------------------------------------------------+
+    /// ```
+    /// Uses ANSI escape codes to render at fixed position without scrolling
+    Fixed,
+    /// Status bar is hidden
+    Off,
 }
 
 impl StatusLineStyle {
@@ -109,7 +119,31 @@ impl StatusLineStyle {
             "full" => Some(Self::Full),
             "compact" => Some(Self::Compact),
             "minimal" => Some(Self::Minimal),
+            "fixed" => Some(Self::Fixed),
+            "off" | "none" | "hidden" => Some(Self::Off),
             _ => None,
+        }
+    }
+
+    /// Get the next style in the cycle (for toggling)
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Fixed => Self::Compact,
+            Self::Compact => Self::Minimal,
+            Self::Minimal => Self::Full,
+            Self::Full => Self::Off,
+            Self::Off => Self::Fixed,
+        }
+    }
+
+    /// Get a human-readable description of the style
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Fixed => "Fixed bar at top of terminal (updates in place)",
+            Self::Compact => "Compact inline status in prompt",
+            Self::Minimal => "Minimal inline status",
+            Self::Full => "Full box-style status line",
+            Self::Off => "Status bar hidden",
         }
     }
 }
@@ -345,6 +379,13 @@ impl StatusIndicator {
             StatusLineStyle::Full => self.render_full(),
             StatusLineStyle::Compact => self.render_compact(),
             StatusLineStyle::Minimal => self.render_minimal(),
+            StatusLineStyle::Fixed => {
+                // Fixed rendering is handled separately via render_fixed_status_bar
+                // to avoid duplicating the status bar display
+            }
+            StatusLineStyle::Off => {
+                // No rendering when status bar is off
+            }
         }
     }
 
@@ -352,16 +393,17 @@ impl StatusIndicator {
     fn render_full(&self) {
         let model_display = self.truncate_model_name();
         let mode_display = format!("{}", self.mode);
+        // GPU display with text label for accessibility (WCAG 1.4.1)
         let gpu_display = self
             .gpu_status
             .as_ref()
             .map(|g| {
                 if g.using_gpu {
-                    format!("{} {}", g.name, "\u{2713}".green())
+                    format!("{} {} (active)", g.name, "\u{2713}".green())
                 } else if g.gpu_type == GpuType::Cpu {
                     "CPU only".to_string()
                 } else {
-                    format!("{} {}", g.name, "\u{2717}".red())
+                    format!("{} {} (fallback)", g.name, "\u{2193}".yellow())
                 }
             })
             .unwrap_or_else(|| "Unknown".to_string());
@@ -442,25 +484,223 @@ impl StatusIndicator {
         io::stdout().flush().ok();
     }
 
-    /// Format mode with color.
+    /// Render fixed status bar at top of terminal.
+    /// Uses ANSI escape codes to position at line 1 without scrolling.
+    ///
+    /// # Arguments
+    /// * `session_time` - Optional (minutes, seconds) remaining in session
+    ///
+    /// # ANSI Escape Codes Used
+    /// - `\x1b[s` - Save cursor position
+    /// - `\x1b[u` - Restore cursor position
+    /// - `\x1b[1;1H` - Move to row 1, col 1
+    /// - `\x1b[K` - Clear to end of line
+    /// - `\x1b[2K` - Clear entire line
+    pub fn render_fixed_status_bar(&self, session_time: Option<(u64, u64)>) {
+        if !self.config.show_status_line {
+            return;
+        }
+
+        // Only render for Fixed style
+        if self.config.status_line_style != StatusLineStyle::Fixed {
+            return;
+        }
+
+        // Get terminal width, default to 80 if unable to detect
+        let term_width = crossterm::terminal::size()
+            .map(|(w, _)| w as usize)
+            .unwrap_or(80);
+
+        // Build content sections
+        let model_display = self.truncate_model_name();
+
+        // Mode display
+        let mode_str = match self.mode {
+            OperatingMode::Local => "[LOCAL]",
+            OperatingMode::Cloud => "[CLOUD]",
+            OperatingMode::Auto => "[AUTO]",
+            OperatingMode::Hybrid => "[HYBRID]",
+        };
+
+        // GPU status
+        let gpu_str = self
+            .gpu_status
+            .as_ref()
+            .map(|g| {
+                if g.gpu_type == GpuType::Cpu {
+                    "CPU"
+                } else if g.using_gpu {
+                    "GPU\u{2713}"
+                } else {
+                    "CPU\u{2193}"
+                }
+            })
+            .unwrap_or("?");
+
+        // Session time
+        let time_str = session_time
+            .map(|(mins, secs)| format!("{}:{:02} remaining", mins, secs))
+            .unwrap_or_else(|| "".to_string());
+
+        // Help hint
+        let help_hint = "/help";
+
+        // Calculate content width (without colors)
+        // Format: | model | mode | gpu | time | /help |
+        let content_parts = [
+            &model_display,
+            mode_str,
+            gpu_str,
+            &time_str,
+            help_hint,
+        ];
+        let separators = " \u{2502} "; // " | "
+        let content_width: usize = content_parts.iter().map(|s| s.len()).sum::<usize>()
+            + (separators.len() * (content_parts.len() - 1))
+            + 4; // Borders and padding
+
+        // Ensure we don't exceed terminal width
+        let bar_width = term_width.min(content_width.max(60));
+
+        // ANSI codes
+        const SAVE_CURSOR: &str = "\x1b[s";
+        const RESTORE_CURSOR: &str = "\x1b[u";
+        const MOVE_TO_TOP: &str = "\x1b[1;1H";
+        const CLEAR_LINE: &str = "\x1b[2K";
+
+        // Save cursor position
+        print!("{}", SAVE_CURSOR);
+
+        // Move to top of terminal and clear the lines we'll use
+        print!("{}", MOVE_TO_TOP);
+        print!("{}", CLEAR_LINE);
+
+        // Draw top border
+        print!(
+            "{}",
+            format!(
+                "\u{250C}{}\u{2510}",
+                "\u{2500}".repeat(bar_width.saturating_sub(2))
+            )
+            .bright_cyan()
+        );
+
+        // Move to next line
+        print!("\x1b[2;1H");
+        print!("{}", CLEAR_LINE);
+
+        // Draw content line
+        print!("{}", "\u{2502}".bright_cyan());
+        print!(" {}", model_display.bright_white().bold());
+        print!(" {} ", "\u{2502}".bright_black());
+        print!("{}", self.format_mode_colored());
+        print!(" {} ", "\u{2502}".bright_black());
+        print!("{}", self.format_gpu_short_colored());
+
+        if !time_str.is_empty() {
+            print!(" {} ", "\u{2502}".bright_black());
+            // Color time based on urgency
+            if let Some((mins, _)) = session_time {
+                if mins < 2 {
+                    print!("{}", time_str.red().bold());
+                } else if mins < 5 {
+                    print!("{}", time_str.yellow());
+                } else {
+                    print!("{}", time_str.bright_black());
+                }
+            }
+        }
+
+        print!(" {} ", "\u{2502}".bright_black());
+        print!("{}", help_hint.cyan());
+
+        // Pad and close the box
+        let content_so_far = format!(
+            " {} | {} | {} | {} | {} ",
+            model_display, mode_str, gpu_str, time_str, help_hint
+        );
+        let padding = bar_width.saturating_sub(content_so_far.len() + 2);
+        print!("{}", " ".repeat(padding));
+        print!("{}", "\u{2502}".bright_cyan());
+
+        // Move to next line
+        print!("\x1b[3;1H");
+        print!("{}", CLEAR_LINE);
+
+        // Draw bottom border
+        print!(
+            "{}",
+            format!(
+                "\u{2514}{}\u{2518}",
+                "\u{2500}".repeat(bar_width.saturating_sub(2))
+            )
+            .bright_cyan()
+        );
+
+        // Restore cursor position
+        print!("{}", RESTORE_CURSOR);
+
+        io::stdout().flush().ok();
+    }
+
+    /// Clear the fixed status bar (call when switching away from fixed mode)
+    pub fn clear_fixed_status_bar(&self) {
+        const SAVE_CURSOR: &str = "\x1b[s";
+        const RESTORE_CURSOR: &str = "\x1b[u";
+        const MOVE_TO_TOP: &str = "\x1b[1;1H";
+        const CLEAR_LINE: &str = "\x1b[2K";
+
+        print!("{}", SAVE_CURSOR);
+        print!("{}", MOVE_TO_TOP);
+        print!("{}", CLEAR_LINE);
+        print!("\x1b[2;1H");
+        print!("{}", CLEAR_LINE);
+        print!("\x1b[3;1H");
+        print!("{}", CLEAR_LINE);
+        print!("{}", RESTORE_CURSOR);
+        io::stdout().flush().ok();
+    }
+
+    /// Check if the current style is Fixed
+    pub fn is_fixed_style(&self) -> bool {
+        self.config.status_line_style == StatusLineStyle::Fixed
+    }
+
+    /// Set the status line style
+    pub fn set_style(&mut self, style: StatusLineStyle) {
+        // If switching away from fixed mode, clear the fixed bar
+        if self.config.status_line_style == StatusLineStyle::Fixed && style != StatusLineStyle::Fixed {
+            self.clear_fixed_status_bar();
+        }
+        self.config.status_line_style = style;
+        // Update show_status_line based on style
+        self.config.show_status_line = style != StatusLineStyle::Off;
+    }
+
+    /// Get the current style
+    pub fn style(&self) -> StatusLineStyle {
+        self.config.status_line_style
+    }
+
+    /// Format mode with color and text label for accessibility (WCAG 1.4.1).
     fn format_mode_colored(&self) -> colored::ColoredString {
         match self.mode {
-            OperatingMode::Local => "local".green(),
-            OperatingMode::Cloud => "cloud".yellow(),
-            OperatingMode::Auto => "auto".cyan(),
-            OperatingMode::Hybrid => "hybrid".bright_blue(),
+            OperatingMode::Local => "[LOCAL]".green(),
+            OperatingMode::Cloud => "[CLOUD]".yellow(),
+            OperatingMode::Auto => "[AUTO]".cyan(),
+            OperatingMode::Hybrid => "[HYBRID]".bright_blue(),
         }
     }
 
-    /// Format GPU status with color (short form).
+    /// Format GPU status with color and text label for accessibility (WCAG 1.4.1).
     fn format_gpu_short_colored(&self) -> colored::ColoredString {
         if let Some(ref gpu) = self.gpu_status {
             if gpu.gpu_type == GpuType::Cpu {
                 "CPU".bright_black()
             } else if gpu.using_gpu {
-                format!("GPU {}", "\u{2713}").green()
+                "GPU\u{2713}".green() // GPU checkmark - GPU active
             } else {
-                format!("GPU {}", "\u{2717}").red()
+                "CPU\u{2193}".yellow() // CPU with down arrow - fallback to CPU
             }
             .into()
         } else {
@@ -468,15 +708,15 @@ impl StatusIndicator {
         }
     }
 
-    /// Format GPU status with color (full form).
+    /// Format GPU status with color and text label for accessibility (WCAG 1.4.1).
     fn format_gpu_colored(&self) -> String {
         if let Some(ref gpu) = self.gpu_status {
             if gpu.gpu_type == GpuType::Cpu {
                 "CPU only".bright_black().to_string()
             } else if gpu.using_gpu {
-                format!("{} {}", gpu.name, "\u{2713}".green())
+                format!("{} {} (active)", gpu.name, "\u{2713}".green())
             } else {
-                format!("{} {}", gpu.name, "\u{2717}".red())
+                format!("{} {} (fallback to CPU)", gpu.name, "\u{2193}".yellow())
             }
         } else {
             "Unknown".bright_black().to_string()
@@ -499,36 +739,37 @@ impl StatusIndicator {
         };
         println!("  Mode: {}", mode_detail.bright_white());
 
-        // GPU
+        // GPU - with text labels for accessibility (WCAG 1.4.1)
         if let Some(ref gpu) = self.gpu_status {
             let gpu_display = if gpu.gpu_type == GpuType::Cpu {
                 "None (CPU mode)".bright_black().to_string()
             } else {
                 let status = if gpu.using_gpu {
-                    format!("{}", "\u{2713}".green())
+                    format!("{} (active)", "\u{2713}".green())
                 } else {
-                    format!("{} (fallback)", "\u{2717}".red())
+                    format!("{} (fallback to CPU)", "\u{2193}".yellow())
                 };
                 format!("{} {}", gpu.name, status)
             };
             println!("  GPU: {}", gpu_display);
 
-            // VRAM
+            // VRAM - with text labels for accessibility (WCAG 1.4.1)
             if let Some(ref vram) = gpu.vram_usage {
                 let usage_pct = vram.usage_percent();
-                let usage_color = if usage_pct > 90.0 {
-                    "red"
+                let (usage_color, status_text) = if usage_pct > 90.0 {
+                    ("red", " ✗")
                 } else if usage_pct > 70.0 {
-                    "yellow"
+                    ("yellow", " ⚠")
                 } else {
-                    "green"
+                    ("green", " ✓")
                 };
 
                 let vram_str = format!(
-                    "{:.1}/{} GB ({:.0}%)",
+                    "{:.1}/{} GB ({:.0}%){}",
                     vram.used_mb as f64 / 1024.0,
                     vram.total_gb(),
-                    usage_pct
+                    usage_pct,
+                    status_text
                 );
 
                 let colored_vram = match usage_color {
@@ -565,6 +806,7 @@ impl StatusIndicator {
 }
 
 /// Get a prompt string with integrated status for the chat loop.
+/// Uses text labels for accessibility (WCAG 1.4.1).
 pub fn get_status_prompt(indicator: &StatusIndicator, session_time: Option<(u64, u64)>) -> String {
     let mut prompt = String::new();
 
@@ -580,6 +822,7 @@ pub fn get_status_prompt(indicator: &StatusIndicator, session_time: Option<(u64,
                     indicator.model.clone()
                 };
 
+                // GPU status with text label for accessibility
                 let gpu_str = indicator
                     .gpu_status
                     .as_ref()
@@ -587,16 +830,25 @@ pub fn get_status_prompt(indicator: &StatusIndicator, session_time: Option<(u64,
                         if g.gpu_type == GpuType::Cpu {
                             "CPU"
                         } else if g.using_gpu {
-                            "GPU\u{2713}"
+                            "GPU\u{2713}" // GPU active
                         } else {
-                            "GPU\u{2717}"
+                            "CPU\u{2193}" // Fallback to CPU
                         }
                     })
                     .unwrap_or("?");
 
-                prompt.push_str(&format!("[{} | {} | {}] ", model, indicator.mode, gpu_str));
+                // Mode with explicit text label
+                let mode_str = match indicator.mode {
+                    OperatingMode::Local => "[LOCAL]",
+                    OperatingMode::Cloud => "[CLOUD]",
+                    OperatingMode::Auto => "[AUTO]",
+                    OperatingMode::Hybrid => "[HYBRID]",
+                };
+
+                prompt.push_str(&format!("[{} | {} | {}] ", model, mode_str, gpu_str));
             }
             StatusLineStyle::Minimal => {
+                // GPU status with text label for accessibility
                 let gpu_str = indicator
                     .gpu_status
                     .as_ref()
@@ -604,22 +856,42 @@ pub fn get_status_prompt(indicator: &StatusIndicator, session_time: Option<(u64,
                         if g.gpu_type == GpuType::Cpu {
                             "CPU"
                         } else if g.using_gpu {
-                            "GPU"
+                            "GPU\u{2713}" // GPU active
                         } else {
-                            "cpu"
+                            "CPU\u{2193}" // Fallback to CPU
                         }
                     })
                     .unwrap_or("?");
 
-                prompt.push_str(&format!("[{}|{}] ", indicator.mode, gpu_str));
+                // Mode with explicit text label
+                let mode_str = match indicator.mode {
+                    OperatingMode::Local => "[LOCAL]",
+                    OperatingMode::Cloud => "[CLOUD]",
+                    OperatingMode::Auto => "[AUTO]",
+                    OperatingMode::Hybrid => "[HYBRID]",
+                };
+
+                prompt.push_str(&format!("[{}|{}] ", mode_str, gpu_str));
+            }
+            StatusLineStyle::Fixed => {
+                // Fixed style - status bar is rendered separately at top of terminal
+                // No inline status in the prompt
+            }
+            StatusLineStyle::Off => {
+                // No status display
             }
         }
     }
 
-    // Add session time if configured
+    // Add session time if configured (with urgency icon when low)
     if let Some((mins, secs)) = session_time {
         if indicator.config.show_session_time {
-            prompt.push_str(&format!("[{}:{:02}] ", mins, secs));
+            let remaining = mins * 60 + secs;
+            if remaining <= 120 {
+                prompt.push_str(&format!("\u{23F0}[{}:{:02}] ", mins, secs)); // Clock icon for urgency
+            } else {
+                prompt.push_str(&format!("[{}:{:02}] ", mins, secs));
+            }
         }
     }
 
@@ -661,7 +933,42 @@ mod tests {
             StatusLineStyle::from_str("minimal"),
             Some(StatusLineStyle::Minimal)
         );
+        assert_eq!(
+            StatusLineStyle::from_str("fixed"),
+            Some(StatusLineStyle::Fixed)
+        );
+        assert_eq!(
+            StatusLineStyle::from_str("off"),
+            Some(StatusLineStyle::Off)
+        );
+        assert_eq!(
+            StatusLineStyle::from_str("none"),
+            Some(StatusLineStyle::Off)
+        );
+        assert_eq!(
+            StatusLineStyle::from_str("hidden"),
+            Some(StatusLineStyle::Off)
+        );
         assert_eq!(StatusLineStyle::from_str("invalid"), None);
+    }
+
+    #[test]
+    fn test_status_line_style_next() {
+        // Test the cycling behavior
+        assert_eq!(StatusLineStyle::Fixed.next(), StatusLineStyle::Compact);
+        assert_eq!(StatusLineStyle::Compact.next(), StatusLineStyle::Minimal);
+        assert_eq!(StatusLineStyle::Minimal.next(), StatusLineStyle::Full);
+        assert_eq!(StatusLineStyle::Full.next(), StatusLineStyle::Off);
+        assert_eq!(StatusLineStyle::Off.next(), StatusLineStyle::Fixed);
+    }
+
+    #[test]
+    fn test_status_line_style_description() {
+        assert!(StatusLineStyle::Fixed.description().contains("Fixed"));
+        assert!(StatusLineStyle::Compact.description().contains("Compact"));
+        assert!(StatusLineStyle::Minimal.description().contains("Minimal"));
+        assert!(StatusLineStyle::Full.description().contains("Full"));
+        assert!(StatusLineStyle::Off.description().contains("hidden"));
     }
 
     #[test]

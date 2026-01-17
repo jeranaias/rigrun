@@ -185,7 +185,7 @@ try {
 # Check for Ollama
 Write-Host ""
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
-    Write-Host "  [!] Ollama not found (required for local inference)" -ForegroundColor Yellow
+    Write-Host "  ⚠ Ollama not found (required for local inference)" -ForegroundColor Yellow
     Write-Host ""
     $install = Read-Host "  Install Ollama now? (Y/n)"
     if ($install -ne 'n' -and $install -ne 'N') {

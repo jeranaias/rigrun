@@ -1636,7 +1636,7 @@ pub struct PostLoadGpuCheck {
 /// let check = check_loaded_model_gpu_usage("qwen2.5-coder:14b", &gpu);
 ///
 /// if let Some(ref warning) = check.warning {
-///     println!("[!] Warning: {}", warning);
+///     println!("⚠ Warning: {}", warning);
 /// }
 /// ```
 pub fn check_loaded_model_gpu_usage(model_name: &str, gpu_info: &GpuInfo) -> PostLoadGpuCheck {
@@ -1728,7 +1728,7 @@ pub fn format_cpu_fallback_warning(
     let mut lines = Vec::new();
 
     lines.push(format!(
-        "[!] Warning: Model '{}' may be running on CPU - inference will be slow",
+        "⚠ Warning: Model '{}' may be running on CPU - inference will be slow",
         model_name
     ));
 

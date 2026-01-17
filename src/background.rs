@@ -106,9 +106,9 @@ fn create_startup_shortcut() -> Result<()> {
 
 pub fn handle_background_server() -> Result<()> {
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== Run as Background Server ==={RESET}");
+    println!("{CYAN}{BOLD}=== Run as Background Server ==={RESET}");
     println!();
-    println!("{WHITE}Background mode runs rigrun as a detached process:{RESET}");
+    println!("{BOLD}Background mode runs rigrun as a detached process:{RESET}");
     println!("  - Server stays running after terminal closes");
     println!("  - Accessible at {CYAN}http://localhost:8787{RESET}");
     println!("  - Can be stopped with {CYAN}rigrun stop{RESET}");
@@ -153,7 +153,7 @@ pub fn handle_background_server() -> Result<()> {
 
                 // Check if the process is still running
                 if is_rigrun_process(pid) {
-                    println!("{GREEN}[✓]{RESET} Server running in background (PID: {WHITE}{BOLD}{pid}{RESET})");
+                    println!("{GREEN}[✓]{RESET} Server running in background (PID: {BOLD}{pid}{RESET})");
                     println!();
                     println!("Access at: {CYAN}http://localhost:8787{RESET}");
                     println!();
@@ -169,7 +169,7 @@ pub fn handle_background_server() -> Result<()> {
             }
             "Install as Windows Service (coming soon)" => {
                 println!();
-                println!("{YELLOW}[i]{RESET} {WHITE}{BOLD}Windows Service installation{RESET}");
+                println!("{CYAN}ℹ{RESET} {BOLD}Windows Service installation{RESET}");
                 println!();
                 println!("This feature will be available in a future update.");
                 println!();
@@ -190,7 +190,7 @@ pub fn handle_background_server() -> Result<()> {
                         let startup_folder = get_startup_folder()?;
                         println!("{GREEN}[✓]{RESET} Startup shortcut created successfully!");
                         println!();
-                        println!("Location: {WHITE}{}{RESET}", startup_folder.join("RigRun.lnk").display());
+                        println!("Location: {BOLD}{}{RESET}", startup_folder.join("RigRun.lnk").display());
                         println!();
                         println!("RigRun will now:");
                         println!("  - Start automatically when you log in");
@@ -205,15 +205,15 @@ pub fn handle_background_server() -> Result<()> {
                         println!("Manual steps:");
                         let exe_path = std::env::current_exe()?;
                         let startup_folder = get_startup_folder()?;
-                        println!("  1. Create a shortcut to: {WHITE}{}{RESET}", exe_path.display());
-                        println!("  2. Place it in: {WHITE}{}{RESET}", startup_folder.display());
+                        println!("  1. Create a shortcut to: {BOLD}{}{RESET}", exe_path.display());
+                        println!("  2. Place it in: {BOLD}{}{RESET}", startup_folder.display());
                         println!("  3. Set it to run minimized");
                     }
                 }
             }
             "Cancel" => {
                 println!();
-                println!("{YELLOW}[!]{RESET} Cancelled.");
+                println!("{YELLOW}⚠{RESET} Cancelled.");
             }
             _ => {}
         }
@@ -254,7 +254,7 @@ pub fn handle_background_server() -> Result<()> {
 
                 // Check if the process is still running
                 if is_rigrun_process(pid) {
-                    println!("{GREEN}[✓]{RESET} Server running in background (PID: {WHITE}{BOLD}{pid}{RESET})");
+                    println!("{GREEN}[✓]{RESET} Server running in background (PID: {BOLD}{pid}{RESET})");
                     println!();
                     println!("Access at: {CYAN}http://localhost:8787{RESET}");
                     println!();
@@ -270,7 +270,7 @@ pub fn handle_background_server() -> Result<()> {
             }
             "Cancel" => {
                 println!();
-                println!("{YELLOW}[!]{RESET} Cancelled.");
+                println!("{YELLOW}⚠{RESET} Cancelled.");
             }
             _ => {}
         }
@@ -310,7 +310,7 @@ pub fn handle_stop_server() -> Result<()> {
     let pids = find_all_rigrun_processes();
 
     if pids.is_empty() {
-        println!("{YELLOW}[!]{RESET} No rigrun server running");
+        println!("{YELLOW}⚠{RESET} No rigrun server running");
         println!();
         println!("Start one with: {CYAN}rigrun{RESET}");
         println!();
@@ -322,7 +322,7 @@ pub fn handle_stop_server() -> Result<()> {
     let other_pids: Vec<u32> = pids.into_iter().filter(|&pid| pid != current_pid).collect();
 
     if other_pids.is_empty() {
-        println!("{YELLOW}[!]{RESET} No rigrun server running");
+        println!("{YELLOW}⚠{RESET} No rigrun server running");
         println!();
         return Ok(());
     }

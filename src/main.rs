@@ -33,30 +33,27 @@ mod background;
 mod consent_banner;
 mod conversation_store;
 
-// Use firstrun from the library crate
-use rigrun::firstrun;
-
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_PORT: u16 = 8787;
 
-// ANSI color codes for terminal output
+// ANSI color codes for terminal output - Semantic color palette
+// RED = Errors/failures, GREEN = Success/OK, YELLOW = Warnings, CYAN = Info/brand
 mod colors {
     pub const RESET: &str = "\x1b[0m";
     pub const BOLD: &str = "\x1b[1m";
     pub const DIM: &str = "\x1b[2m";
-    pub const RED: &str = "\x1b[31m";
-    pub const GREEN: &str = "\x1b[32m";
-    pub const YELLOW: &str = "\x1b[33m";
-    pub const BLUE: &str = "\x1b[34m";
-    pub const CYAN: &str = "\x1b[36m";
-    pub const WHITE: &str = "\x1b[37m";
-    pub const BRIGHT_CYAN: &str = "\x1b[96m";
+    pub const RED: &str = "\x1b[31m";      // Errors, failures, critical alerts
+    pub const GREEN: &str = "\x1b[32m";    // Success, confirmations, GPU active
+    pub const YELLOW: &str = "\x1b[33m";   // Warnings, timeout alerts, fallbacks
+    pub const CYAN: &str = "\x1b[36m";     // Info messages, prompts, branding
 }
 
 use colors::*;
 
 /// Exit codes following sysexits.h conventions
 /// These provide meaningful exit status to calling processes and scripts
+/// Some exit codes are reserved for future use and not currently utilized
+#[allow(dead_code)]
 mod exit_codes {
     /// Success - operation completed successfully
     pub const SUCCESS: i32 = 0;
@@ -102,19 +99,19 @@ mod spinner {
     /// Finish spinner with success message
     pub fn finish_success(spinner: &ProgressBar, message: &str) {
         spinner.finish_and_clear();
-        println!("\x1b[32m[OK]\x1b[0m {}", message);
+        println!("\x1b[32m✓\x1b[0m {}", message);
     }
 
     /// Finish spinner with warning message
     pub fn finish_warning(spinner: &ProgressBar, message: &str) {
         spinner.finish_and_clear();
-        println!("\x1b[33m[!]\x1b[0m {}", message);
+        println!("\x1b[33m⚠\x1b[0m {}", message);
     }
 
     /// Finish spinner with error message
     pub fn finish_error(spinner: &ProgressBar, message: &str) {
         spinner.finish_and_clear();
-        println!("\x1b[31m[X]\x1b[0m {}", message);
+        println!("\x1b[31m✗\x1b[0m {}", message);
     }
 
     /// Clear spinner silently (for use when transitioning to streaming output)
@@ -232,7 +229,7 @@ impl CodeBlockTracker {
     fn print_char(&self, ch: char) {
         if self.in_code_block {
             // Code content - use distinct styling (bright cyan)
-            print!("{}", format!("{}", ch).bright_cyan());
+            print!("{}", format!("{}", ch).cyan());
         } else {
             // Normal text
             print!("{}", ch);
@@ -241,7 +238,7 @@ impl CodeBlockTracker {
 
     fn print_text(&self, text: &str) {
         if self.in_code_block {
-            print!("{}", text.bright_cyan());
+            print!("{}", text.cyan());
         } else {
             print!("{}", text);
         }
@@ -568,6 +565,9 @@ pub struct Config {
     /// Status line style: "full", "compact", or "minimal" (default: "compact")
     #[serde(default = "default_status_line_style")]
     pub status_line_style: String,
+    /// Show quick tips on startup (default: true for first-time users)
+    #[serde(default = "default_show_tips")]
+    pub show_tips: bool,
 }
 
 fn default_audit_log_enabled() -> bool {
@@ -586,6 +586,10 @@ fn default_status_line_style() -> String {
     "compact".to_string()
 }
 
+fn default_show_tips() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Default)]
 struct Stats {
     queries_today: u64,
@@ -593,6 +597,16 @@ struct Stats {
     cloud_queries: u64,
     money_saved: f64,
     last_reset: Option<String>,
+}
+
+/// Display quick tips for new users
+fn show_quick_tips() {
+    println!("{}", "Quick tips:".cyan().bold());
+    println!("  {} Type naturally - rigrun routes to the best model", "•".dimmed());
+    println!("  {} Use {} to see commands, {} for help", "•".dimmed(), "/".cyan(), "/help".cyan());
+    println!("  {} Press {} to interrupt a response", "•".dimmed(), "Ctrl+C".yellow());
+    println!("  {} Your data stays local by default", "•".dimmed());
+    println!();
 }
 
 fn get_config_dir() -> Result<PathBuf> {
@@ -617,20 +631,20 @@ fn validate_openrouter_key(key: &str) -> bool {
     // Check for common wrong key formats
     if key.starts_with("sk-ant-") {
         eprintln!(
-            "{YELLOW}[!]{RESET} Warning: This looks like an Anthropic API key (starts with 'sk-ant-')."
+            "{YELLOW}⚠{RESET} Warning: This looks like an Anthropic API key (starts with 'sk-ant-')."
         );
         eprintln!(
-            "{YELLOW}[!]{RESET}          OpenRouter keys start with 'sk-or-'. Get one at: https://openrouter.ai/keys"
+            "{YELLOW}⚠{RESET}          OpenRouter keys start with 'sk-or-'. Get one at: https://openrouter.ai/keys"
         );
         return false;
     }
 
     if key.starts_with("sk-") && !key.starts_with("sk-or-") {
         eprintln!(
-            "{YELLOW}[!]{RESET} Warning: This looks like an OpenAI API key (starts with 'sk-')."
+            "{YELLOW}⚠{RESET} Warning: This looks like an OpenAI API key (starts with 'sk-')."
         );
         eprintln!(
-            "{YELLOW}[!]{RESET}          OpenRouter keys start with 'sk-or-'. Get one at: https://openrouter.ai/keys"
+            "{YELLOW}⚠{RESET}          OpenRouter keys start with 'sk-or-'. Get one at: https://openrouter.ai/keys"
         );
         return false;
     }
@@ -638,10 +652,10 @@ fn validate_openrouter_key(key: &str) -> bool {
     // Check for correct OpenRouter format
     if !key.starts_with("sk-or-") {
         eprintln!(
-            "{YELLOW}[!]{RESET} Warning: OpenRouter API key doesn't start with 'sk-or-'."
+            "{YELLOW}⚠{RESET} Warning: OpenRouter API key doesn't start with 'sk-or-'."
         );
         eprintln!(
-            "{YELLOW}[!]{RESET}          This may not be a valid OpenRouter key. Get one at: https://openrouter.ai/keys"
+            "{YELLOW}⚠{RESET}          This may not be a valid OpenRouter key. Get one at: https://openrouter.ai/keys"
         );
         return false;
     }
@@ -733,7 +747,7 @@ fn spawn_stats_updater() -> tokio::task::JoinHandle<()> {
 
             // Clear and write queries line
             let _ = stdout.execute(Clear(ClearType::CurrentLine));
-            println!("  Queries: {WHITE}{BOLD}{}{RESET}    Local: {GREEN}{}{RESET}    Cloud: {YELLOW}{}{RESET}",
+            println!("  Queries: {BOLD}{}{RESET}    Local: {GREEN}{}{RESET}    Cloud: {YELLOW}{}{RESET}",
                 today_queries, local_queries, cloud_queries);
 
             // Clear and write savings line
@@ -756,7 +770,7 @@ fn spawn_stats_updater() -> tokio::task::JoinHandle<()> {
 
 fn print_banner() {
     println!(
-        "{BRIGHT_CYAN}
+        "{CYAN}
    ____  _       ____
   |  _ \\(_) __ _|  _ \\ _   _ _ __
   | |_) | |/ _` | |_) | | | | '_ \\
@@ -773,7 +787,7 @@ fn format_gpu_info(gpu: &GpuInfo) -> String {
     if gpu.gpu_type == GpuType::Cpu {
         format!("{DIM}None detected{RESET}")
     } else {
-        format!("{WHITE}{BOLD}{}{RESET} ({}GB)", gpu.name, gpu.vram_gb)
+        format!("{BOLD}{}{RESET} ({}GB)", gpu.name, gpu.vram_gb)
     }
 }
 
@@ -971,7 +985,7 @@ async fn start_server(config: &Config) -> Result<()> {
     let mut port = config.port.unwrap_or(DEFAULT_PORT);
 
     // Start server immediately - GPU detection happens in background
-    println!("{BLUE}[i]{RESET} Starting server...");
+    println!("{CYAN}ℹ{RESET} Starting server...");
 
     // Spawn GPU detection in background (non-blocking) with animated spinner
     let gpu_spinner = spinner::create("Detecting GPU...");
@@ -1022,17 +1036,17 @@ async fn start_server(config: &Config) -> Result<()> {
     // Handle port conflicts
     if check_server_running(port) {
         println!(
-            "{YELLOW}[!]{RESET} Port {port} is already in use"
+            "{YELLOW}⚠{RESET} Port {port} is already in use"
         );
 
         // Try to find the process using the port
         if let Some(pid) = find_process_on_port(port) {
             if is_rigrun_process(pid) {
                 println!(
-                    "{YELLOW}[!]{RESET} Found existing rigrun server (PID: {pid})"
+                    "{YELLOW}⚠{RESET} Found existing rigrun server (PID: {pid})"
                 );
                 println!(
-                    "{YELLOW}[!]{RESET} Attempting to stop old server..."
+                    "{YELLOW}⚠{RESET} Attempting to stop old server..."
                 );
 
                 if let Err(e) = kill_process(pid) {
@@ -1041,7 +1055,7 @@ async fn start_server(config: &Config) -> Result<()> {
                         e
                     );
                     println!(
-                        "{YELLOW}[!]{RESET} Searching for next available port..."
+                        "{YELLOW}⚠{RESET} Searching for next available port..."
                     );
                 } else {
                     println!("{GREEN}[✓]{RESET} Old server stopped");
@@ -1051,7 +1065,7 @@ async fn start_server(config: &Config) -> Result<()> {
                     // Verify port is now free
                     if check_server_running(port) {
                         println!(
-                            "{YELLOW}[!]{RESET} Port still in use, searching for next available port..."
+                            "{YELLOW}⚠{RESET} Port still in use, searching for next available port..."
                         );
                     } else {
                         println!("{GREEN}[✓]{RESET} Port {port} is now available");
@@ -1059,15 +1073,15 @@ async fn start_server(config: &Config) -> Result<()> {
                 }
             } else {
                 println!(
-                    "{YELLOW}[!]{RESET} Port is used by another process (PID: {pid})"
+                    "{YELLOW}⚠{RESET} Port is used by another process (PID: {pid})"
                 );
                 println!(
-                    "{YELLOW}[!]{RESET} Searching for next available port..."
+                    "{YELLOW}⚠{RESET} Searching for next available port..."
                 );
             }
         } else {
             println!(
-                "{YELLOW}[!]{RESET} Searching for next available port..."
+                "{YELLOW}⚠{RESET} Searching for next available port..."
             );
         }
 
@@ -1090,7 +1104,7 @@ async fn start_server(config: &Config) -> Result<()> {
     // Display clean server dashboard
     println!();
     println!("  Server: {CYAN}http://localhost:{port}{RESET}");
-    println!("  Model:  {WHITE}{model}{RESET}");
+    println!("  Model:  {BOLD}{model}{RESET}");
     println!();
     println!("  {DIM}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{RESET}");
 
@@ -1124,7 +1138,7 @@ fn show_status() -> Result<()> {
     let port = config.port.unwrap_or(DEFAULT_PORT);
 
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== RigRun Status ==={RESET}");
+    println!("{CYAN}{BOLD}=== RigRun Status ==={RESET}");
     println!();
 
     // Server status
@@ -1146,14 +1160,14 @@ fn show_status() -> Result<()> {
         .model
         .clone()
         .unwrap_or_else(|| recommend_model(gpu.vram_gb));
-    println!("{BLUE}[i]{RESET} Model: {WHITE}{BOLD}{model}{RESET}");
+    println!("{CYAN}ℹ{RESET} Model: {BOLD}{model}{RESET}");
 
     // GPU
     if gpu.gpu_type == GpuType::Cpu {
-        println!("{BLUE}[i]{RESET} GPU: {DIM}None (CPU mode){RESET}");
+        println!("{CYAN}ℹ{RESET} GPU: {DIM}None (CPU mode){RESET}");
     } else {
         println!(
-            "{BLUE}[i]{RESET} GPU: {} ({}GB)",
+            "{CYAN}ℹ{RESET} GPU: {} ({}GB)",
             gpu.name, gpu.vram_gb
         );
     }
@@ -1169,17 +1183,17 @@ fn show_status() -> Result<()> {
             GREEN
         };
         println!(
-            "{BLUE}[i]{RESET} VRAM: {usage_color}{}MB{RESET} / {}MB ({usage_color}{:.1}%{RESET} used)",
+            "{CYAN}ℹ{RESET} VRAM: {usage_color}{}MB{RESET} / {}MB ({usage_color}{:.1}%{RESET} used)",
             usage.used_mb, usage.total_mb, usage_pct
         );
         if let Some(util) = usage.gpu_utilization {
-            println!("{BLUE}[i]{RESET} GPU Utilization: {}%", util);
+            println!("{CYAN}ℹ{RESET} GPU Utilization: {}%", util);
         }
     }
 
     // GPU Utilization - check loaded models
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== GPU Utilization ==={RESET}");
+    println!("{CYAN}{BOLD}=== GPU Utilization ==={RESET}");
     println!();
 
     if gpu_report.loaded_models.is_empty() {
@@ -1193,7 +1207,7 @@ fn show_status() -> Result<()> {
                 _ => YELLOW,
             };
             println!(
-                "  {WHITE}{BOLD}{}{RESET} ({}) - {processor_color}{}{RESET}",
+                "  {BOLD}{}{RESET} ({}) - {processor_color}{}{RESET}",
                 loaded.name, loaded.size, loaded.processor
             );
         }
@@ -1203,7 +1217,7 @@ fn show_status() -> Result<()> {
     if !gpu_report.warnings.is_empty() {
         println!();
         for warning in &gpu_report.warnings {
-            println!("{YELLOW}[!]{RESET} {}", warning);
+            println!("{YELLOW}⚠{RESET} {}", warning);
         }
     }
 
@@ -1214,7 +1228,7 @@ fn show_status() -> Result<()> {
             // Only show if not already in warnings
             if !gpu_report.warnings.iter().any(|w| w.contains(&model)) {
                 println!();
-                println!("{YELLOW}[!]{RESET} {}", warning);
+                println!("{YELLOW}⚠{RESET} {}", warning);
                 if let Some(ref suggested) = gpu_status.suggested_model {
                     println!(
                         "    Recommended: {CYAN}rigrun config --model {}{RESET}",
@@ -1226,10 +1240,10 @@ fn show_status() -> Result<()> {
     }
 
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== Today's Stats ==={RESET}");
+    println!("{CYAN}{BOLD}=== Today's Stats ==={RESET}");
     println!();
     println!(
-        "  Total queries:  {WHITE}{BOLD}{}{RESET}",
+        "  Total queries:  {BOLD}{}{RESET}",
         stats.queries_today
     );
     println!("  Local queries:  {GREEN}{}{RESET}", stats.local_queries);
@@ -1249,7 +1263,7 @@ fn handle_config(command: Option<ConfigCommands>) -> Result<()> {
     match command {
         None | Some(ConfigCommands::Show) => {
             println!();
-            println!("{BRIGHT_CYAN}{BOLD}=== RigRun Configuration ==={RESET}");
+            println!("{CYAN}{BOLD}=== RigRun Configuration ==={RESET}");
             println!();
 
             let key_display = config
@@ -1309,7 +1323,7 @@ fn handle_config(command: Option<ConfigCommands>) -> Result<()> {
 
 fn list_models() -> Result<()> {
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== Available Models ==={RESET}");
+    println!("{CYAN}{BOLD}=== Available Models ==={RESET}");
     println!();
 
     let models = [
@@ -1347,7 +1361,7 @@ fn list_models() -> Result<()> {
             "   ".to_string()
         };
         // Use pad_display to correctly handle colored text alignment
-        let colored_name = format!("{WHITE}{}{RESET}", name);
+        let colored_name = format!("{BOLD}{}{RESET}", name);
         let colored_notes = format!("{DIM}{}{RESET}", notes);
         println!(
             "{} {} {} {} {} {}",
@@ -1367,12 +1381,12 @@ fn list_models() -> Result<()> {
     let recommended = recommend_model(gpu.vram_gb);
     if gpu.gpu_type == GpuType::Cpu {
         println!(
-            "{BLUE}[i]{RESET} No GPU detected. Recommended: {GREEN}{BOLD}{}{RESET}",
+            "{CYAN}ℹ{RESET} No GPU detected. Recommended: {GREEN}{BOLD}{}{RESET}",
             recommended
         );
     } else {
         println!(
-            "{BLUE}[i]{RESET} Recommended for your {} ({}GB): {GREEN}{BOLD}{}{RESET}",
+            "{CYAN}ℹ{RESET} Recommended for your {} ({}GB): {GREEN}{BOLD}{}{RESET}",
             gpu.name, gpu.vram_gb, recommended
         );
     }
@@ -1393,7 +1407,7 @@ async fn ensure_ollama_running(gpu: &GpuInfo) -> Result<()> {
     }
 
     // Ollama not running - auto-start it
-    println!("{YELLOW}[!]{RESET} Ollama not running, starting automatically...");
+    println!("{YELLOW}⚠{RESET} Ollama not running, starting automatically...");
 
     // Determine if we need Vulkan for RDNA 4
     let needs_vulkan = gpu.gpu_type == GpuType::Amd && {
@@ -1407,7 +1421,7 @@ async fn ensure_ollama_running(gpu: &GpuInfo) -> Result<()> {
 
     if needs_vulkan {
         cmd.env("OLLAMA_VULKAN", "1");
-        println!("{BLUE}[i]{RESET} RDNA 4 detected - enabling Vulkan backend");
+        println!("{CYAN}ℹ{RESET} RDNA 4 detected - enabling Vulkan backend");
     }
 
     // Start Ollama in background (detached)
@@ -1452,7 +1466,7 @@ async fn ensure_ollama_running(gpu: &GpuInfo) -> Result<()> {
             );
         }
         Err(e) => {
-            println!("{RED}[X]{RESET} Failed to start Ollama: {}", e);
+            println!("{RED}✗{RESET} Failed to start Ollama: {}", e);
             anyhow::bail!(
                 "Failed to start Ollama. Is it installed?\n  \
                  Download from: https://ollama.ai/download"
@@ -1474,7 +1488,7 @@ fn check_ollama_running_quick() -> bool {
 
 async fn pull_model(model: String) -> Result<()> {
     println!();
-    println!("{CYAN}[↓]{RESET} Pulling {WHITE}{BOLD}{model}{RESET}...");
+    println!("{CYAN}[↓]{RESET} Pulling {BOLD}{model}{RESET}...");
     println!();
 
     use indicatif::{ProgressBar, ProgressStyle};
@@ -1494,7 +1508,7 @@ async fn pull_model(model: String) -> Result<()> {
         || model.contains(':'); // Allow any model with a tag
 
     if !is_valid {
-        println!("{YELLOW}[!]{RESET} Warning: '{model}' may not be a known model.");
+        println!("{YELLOW}⚠{RESET} Warning: '{model}' may not be a known model.");
         println!("    Attempting to pull anyway...");
         println!();
     }
@@ -1575,7 +1589,7 @@ async fn pull_model(model: String) -> Result<()> {
     match result {
         Ok(()) => {
             println!(
-                "{GREEN}[✓]{RESET} Model {WHITE}{BOLD}{model}{RESET} downloaded successfully!"
+                "{GREEN}[✓]{RESET} Model {BOLD}{model}{RESET} downloaded successfully!"
             );
             println!();
             println!("Start the server with: {CYAN}rigrun{RESET}");
@@ -1615,15 +1629,15 @@ fn ensure_model_available(client: &OllamaClient, model: &str) -> Result<()> {
 
     if !client.check_ollama_running() {
         anyhow::bail!(
-            "Ollama is not running. Please start it with: {}", "ollama serve".bright_cyan()
+            "Ollama is not running. Please start it with: {}", "ollama serve".cyan()
         );
     }
 
     if !client.has_model(model)? {
         println!(
             "{} Model {} not found. Downloading...",
-            "[↓]".bright_yellow(),
-            model.bright_white().bold()
+            "[↓]".yellow(),
+            model.bold()
         );
 
         // Create a progress bar with indicatif
@@ -1674,7 +1688,7 @@ fn ensure_model_available(client: &OllamaClient, model: &str) -> Result<()> {
         })?;
 
         pb.finish_and_clear();
-        println!("{} Model ready", "[✓]".bright_green());
+        println!("{} Model ready", "[✓]".green());
     }
 
     Ok(())
@@ -1761,7 +1775,7 @@ fn direct_prompt(prompt: &str, model: Option<String>) -> Result<()> {
             response.completion_tokens.to_string().bright_black(),
             elapsed.as_secs_f64(),
             tokens_per_sec,
-            time_to_first_token.to_string().bright_green()
+            time_to_first_token.to_string().green()
         );
     }
 
@@ -1828,20 +1842,25 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
     }
     println!(
         "{} Interactive chat mode | Type 'exit' or Ctrl+C to quit",
-        "rigrun".bright_cyan().bold()
+        "rigrun".cyan().bold()
     );
     println!(
         "{} Model: {} | Mode: {} | Session: {} min",
-        "[i]".bright_blue(),
-        model.bright_white(),
+        "ℹ".cyan(),
+        model.bold(),
         "local".green(),
         rigrun::CLI_SESSION_TIMEOUT_SECS / 60
     );
     println!(
         "{} Type {} for commands (/status, /model), Tab for completion\n",
-        "[i]".bright_blue(),
-        "/help".bright_cyan()
+        "ℹ".cyan(),
+        "/help".cyan()
     );
+
+    // Show quick tips for first-time users or when configured
+    if config.show_tips || rigrun::firstrun::is_first_run() {
+        show_quick_tips();
+    }
 
     let mut conversation: Vec<Message> = Vec::new();
     let mut auto_save = false;
@@ -1858,7 +1877,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                     let needs_reauth = session.show_expiration();
                     if needs_reauth {
                         // Require consent banner re-acknowledgment
-                        println!("\n{} Re-authenticating session...\n", "[!]".yellow());
+                        println!("\n{} Re-authenticating session...\n", "⚠".yellow());
 
                         // Show consent banner again
                         if let Err(e) = consent_banner::handle_consent_banner(false, true) {
@@ -1873,7 +1892,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
 
                         println!(
                             "\n{} Session renewed. Timeout: {} minutes\n",
-                            "[+]".green(),
+                            "✓".green(),
                             rigrun::CLI_SESSION_TIMEOUT_SECS / 60
                         );
                     }
@@ -1881,12 +1900,12 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 CliSessionState::Warning => {
                     session.show_warning();
                     // Wait for user acknowledgment
-                    print!("{} Press ENTER to continue... ", "[!]".yellow());
+                    print!("{} Press ENTER to continue... ", "⚠".yellow());
                     io::stdout().flush()?;
                     let mut ack = String::new();
                     stdin.read_line(&mut ack)?;
                     session.refresh();
-                    println!("{} Session extended.\n", "[+]".green());
+                    println!("{} Session extended.\n", "✓".green());
                     continue;
                 }
                 _ => {}
@@ -1904,8 +1923,9 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 StatusLineStyle::Full => {
                     // Full style shows status line above prompt
                     status_indicator.render();
+                    // Time with urgency icon when low (WCAG 1.4.1 accessibility)
                     let time_indicator = if remaining <= 120 {
-                        format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+                        format!("\x1b[33m\u{23F0}[{}:{:02}]\x1b[0m", mins, secs) // Clock icon for urgency
                     } else {
                         format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
                     };
@@ -1913,56 +1933,92 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 }
                 StatusLineStyle::Compact => {
                     // Compact style: [model | mode | GPU] [time] You:
+                    // Uses text labels for accessibility (WCAG 1.4.1)
                     let model_short = if model.len() > 15 {
                         format!("{}...", &model[..12])
                     } else {
                         model.clone()
                     };
+                    // GPU status with text label for accessibility
                     let gpu_str = status_indicator.gpu_status()
                         .map(|g| {
                             if g.gpu_type == GpuType::Cpu {
                                 "CPU"
                             } else if g.using_gpu {
-                                "GPU\u{2713}"
+                                "GPU\u{2713}" // GPU active
                             } else {
-                                "GPU\u{2717}"
+                                "CPU\u{2193}" // Fallback to CPU
                             }
                         })
                         .unwrap_or("?");
+                    // Mode with explicit text label
+                    let mode_str = match status_indicator.mode() {
+                        OperatingMode::Local => "[LOCAL]",
+                        OperatingMode::Cloud => "[CLOUD]",
+                        OperatingMode::Auto => "[AUTO]",
+                        OperatingMode::Hybrid => "[HYBRID]",
+                    };
+                    // Time with urgency icon when low
                     let time_indicator = if remaining <= 120 {
-                        format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+                        format!("\x1b[33m\u{23F0}[{}:{:02}]\x1b[0m", mins, secs) // Clock icon for urgency
                     } else {
                         format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
                     };
                     format!("\x1b[90m[{} | {} | {}]\x1b[0m {} \x1b[96m\x1b[1mYou:\x1b[0m ",
-                        model_short, status_indicator.mode(), gpu_str, time_indicator)
+                        model_short, mode_str, gpu_str, time_indicator)
                 }
                 StatusLineStyle::Minimal => {
                     // Minimal style: [mode|GPU] [time] You:
+                    // Uses text labels for accessibility (WCAG 1.4.1)
+                    // GPU status with text label
                     let gpu_str = status_indicator.gpu_status()
                         .map(|g| {
                             if g.gpu_type == GpuType::Cpu {
                                 "CPU"
                             } else if g.using_gpu {
-                                "GPU"
+                                "GPU\u{2713}" // GPU active
                             } else {
-                                "cpu"
+                                "CPU\u{2193}" // Fallback to CPU
                             }
                         })
                         .unwrap_or("?");
+                    // Mode with explicit text label
+                    let mode_str = match status_indicator.mode() {
+                        OperatingMode::Local => "[LOCAL]",
+                        OperatingMode::Cloud => "[CLOUD]",
+                        OperatingMode::Auto => "[AUTO]",
+                        OperatingMode::Hybrid => "[HYBRID]",
+                    };
+                    // Time with urgency icon when low
                     let time_indicator = if remaining <= 120 {
-                        format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+                        format!("\x1b[33m\u{23F0}[{}:{:02}]\x1b[0m", mins, secs) // Clock icon for urgency
                     } else {
                         format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
                     };
                     format!("\x1b[90m[{}|{}]\x1b[0m {} \x1b[96m\x1b[1mYou:\x1b[0m ",
-                        status_indicator.mode(), gpu_str, time_indicator)
+                        mode_str, gpu_str, time_indicator)
+                }
+                StatusLineStyle::Fixed => {
+                    // Fixed style: render status bar at top of terminal
+                    status_indicator.render_fixed_status_bar(Some((mins, secs)));
+                    // Simple prompt since status is shown at top
+                    "\x1b[96m\x1b[1mYou:\x1b[0m ".to_string()
+                }
+                StatusLineStyle::Off => {
+                    // No status display - simple prompt with time
+                    let time_indicator = if remaining <= 120 {
+                        format!("\x1b[33m\u{23F0}[{}:{:02}]\x1b[0m", mins, secs) // Clock icon for urgency
+                    } else {
+                        format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
+                    };
+                    format!("\x1b[96m\x1b[1mYou:\x1b[0m {} ", time_indicator)
                 }
             }
         } else {
             // No status line - simple prompt with time
+            // Time with urgency icon when low (WCAG 1.4.1 accessibility)
             let time_indicator = if remaining <= 120 {
-                format!("\x1b[33m[{}:{:02}]\x1b[0m", mins, secs)
+                format!("\x1b[33m\u{23F0}[{}:{:02}]\x1b[0m", mins, secs) // Clock icon for urgency
             } else {
                 format!("\x1b[90m[{}:{:02}]\x1b[0m", mins, secs)
             };
@@ -1977,7 +2033,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 break;
             }
             Err(e) => {
-                eprintln!("{} Input error: {}", "[!]".red(), e);
+                eprintln!("{} Input error: {}", "⚠".red(), e);
                 continue;
             }
         };
@@ -1996,19 +2052,19 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         if owned_input.eq_ignore_ascii_case("exit") || owned_input.eq_ignore_ascii_case("quit") {
             // Handle auto-save on exit
             if auto_save && !conversation.is_empty() {
-                println!("{} Auto-saving conversation...", "[i]".bright_blue());
+                println!("{} Auto-saving conversation...", "ℹ".cyan());
                 if let Some(ref id) = current_conversation_id {
                     if let Err(e) = store.update(id, conversation.clone()) {
-                        eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                        eprintln!("{} Failed to auto-save: {}", "⚠".yellow(), e);
                     } else {
-                        println!("{} Conversation saved.", "[+]".green());
+                        println!("{} Conversation saved.", "✓".green());
                     }
                 } else {
                     let saved = conversation_store::SavedConversation::new(&model, conversation.clone());
                     if let Err(e) = store.save(&saved) {
-                        eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                        eprintln!("{} Failed to auto-save: {}", "⚠".yellow(), e);
                     } else {
-                        println!("{} Saved: \"{}\"", "[+]".green(), saved.summary);
+                        println!("{} Saved: \"{}\"", "✓".green(), saved.summary);
                     }
                 }
             }
@@ -2042,11 +2098,22 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                         // Update status indicator with new model
                         status_indicator.set_model(&model);
                         status_indicator.refresh_gpu_status();
-                        println!("{} Switched to model: {}", "[+]".green(), model.bright_white());
+                        println!("{} Switched to model: {}", "✓".green(), model.bold());
                     } else {
-                        println!("{} Model '{}' not found.", "[!]".yellow(), new_model);
-                        println!("    {}", "Tip: Use Tab to see available models, or pull with:".bright_black());
-                        println!("    {}", format!("ollama pull {}", new_model).bright_cyan());
+                        println!("{} Model '{}' not found.", "⚠".yellow(), new_model);
+                        let available = list_ollama_models();
+                        if !available.is_empty() {
+                            println!("    Available models:");
+                            for model in available.iter().take(10) {
+                                println!("      {} {}", "•".cyan(), model.bright_white());
+                            }
+                            if available.len() > 10 {
+                                println!("      {} ... and {} more (use Tab to see all)", "•".cyan(), available.len() - 10);
+                            }
+                        } else {
+                            println!("    {}", "Tip: Use Tab to see available models, or pull with:".bright_black());
+                            println!("    {}", format!("ollama pull {}", new_model).cyan());
+                        }
                     }
                     continue;
                 }
@@ -2064,10 +2131,10 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                             OperatingMode::Auto => "Auto - local first, cloud fallback if needed",
                             OperatingMode::Hybrid => "Hybrid - intelligent routing based on query complexity",
                         };
-                        println!("{} Mode: {} - {}", "[+]".green(), new_mode.bright_white(), mode_desc.bright_black());
+                        println!("{} Mode: {} - {}", "✓".green(), new_mode.bold(), mode_desc.bright_black());
                     }
                     None => {
-                        println!("{} Invalid mode '{}'. Available: local, cloud, auto, hybrid", "[!]".yellow(), new_mode);
+                        println!("{} Invalid mode '{}'. Available: local, cloud, auto, hybrid", "⚠".yellow(), new_mode);
                     }
                 }
                 continue;
@@ -2076,12 +2143,12 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
             // Special case: /retry command to resend last failed message
             if owned_input == "/retry" || owned_input == "/r!" {
                 if let Some(failed_msg) = last_failed_message.take() {
-                    println!("{} Retrying last message...", "[i]".bright_blue());
+                    println!("{} Retrying last message...", "ℹ".cyan());
                     // Set input to the failed message
                     owned_input = failed_msg;
                     // Fall through to process the message (not a slash command anymore)
                 } else {
-                    println!("{} No failed message to retry.", "[!]".yellow());
+                    println!("{} No failed message to retry.", "⚠".yellow());
                     println!("    {}", "Tip: /retry resends your last message that failed to send.".bright_black());
                     continue;
                 }
@@ -2111,19 +2178,19 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 CommandResult::Exit => {
                     // Handle auto-save on exit
                     if auto_save && !conversation.is_empty() {
-                        println!("{} Auto-saving conversation...", "[i]".bright_blue());
+                        println!("{} Auto-saving conversation...", "ℹ".cyan());
                         if let Some(ref id) = current_conversation_id {
                             if let Err(e) = store.update(id, conversation.clone()) {
-                                eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                                eprintln!("{} Failed to auto-save: {}", "⚠".yellow(), e);
                             } else {
-                                println!("{} Conversation saved.", "[+]".green());
+                                println!("{} Conversation saved.", "✓".green());
                             }
                         } else {
                             let saved = conversation_store::SavedConversation::new(&model, conversation.clone());
                             if let Err(e) = store.save(&saved) {
-                                eprintln!("{} Failed to auto-save: {}", "[!]".yellow(), e);
+                                eprintln!("{} Failed to auto-save: {}", "⚠".yellow(), e);
                             } else {
-                                println!("{} Saved: \"{}\"", "[+]".green(), saved.summary);
+                                println!("{} Saved: \"{}\"", "✓".green(), saved.summary);
                             }
                         }
                     }
@@ -2135,12 +2202,12 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                     // Resume the conversation
                     println!(
                         "\n{} Resuming \"{}\"...",
-                        "[+]".green(),
+                        "✓".green(),
                         conv.summary
                     );
                     println!(
                         "{} Loading {} messages from previous session.\n",
-                        "[i]".bright_blue(),
+                        "ℹ".cyan(),
                         conv.message_count
                     );
 
@@ -2157,12 +2224,24 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                         };
                         println!(
                             "{} Your last message was:\n  \"{}\"\n",
-                            "[i]".bright_blue(),
-                            display_msg.bright_white()
+                            "ℹ".cyan(),
+                            display_msg.bold()
                         );
                     }
 
-                    println!("{} Ready to continue.\n", "[+]".green());
+                    println!("{} Ready to continue.\n", "✓".green());
+                    continue;
+                }
+                CommandResult::SetStatusBarStyle(new_style) => {
+                    // Update the status indicator style
+                    status_indicator.set_style(new_style);
+                    // If switching to fixed mode, render the fixed bar immediately
+                    if new_style == StatusLineStyle::Fixed {
+                        let remaining = session.time_remaining_secs();
+                        let mins = remaining / 60;
+                        let secs = remaining % 60;
+                        status_indicator.render_fixed_status_bar(Some((mins, secs)));
+                    }
                     continue;
                 }
             }
@@ -2181,7 +2260,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
 
         // Display what context was included
         for msg in &context_messages {
-            println!("{}", msg.bright_blue());
+            println!("{}", msg.cyan());
         }
         if !context_messages.is_empty() {
             println!(); // Extra line after context messages
@@ -2244,7 +2323,7 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                     // Store error for @error mention
                     rigrun::store_last_error(&format!("{}", e));
                     println!("\r{}\r", " ".repeat(12)); // Clear thinking indicator
-                    eprintln!("{} {}", "[Error]".red(), e);
+                    eprintln!("{} {}", "✗".red(), e);
                     // Store the failed message for /retry
                     last_failed_message = Some(owned_input.clone());
                     println!("    {}", "Tip: Use /retry to resend this message.".bright_black());
@@ -2283,22 +2362,31 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 0.0
             };
 
+            // Format prompt tokens if available
+            let prompt_str = if response.prompt_tokens > 0 {
+                format!(" + {} prompt", response.prompt_tokens.to_string().dimmed())
+            } else {
+                String::new()
+            };
+
             println!(
-                "{} {:.1}s | {} tok/s | TTFT: {}ms\n",
-                "───".bright_black(),
+                "{} {:.1}s │ {} tokens{} @ {:.1} tok/s │ TTFT {}ms\n",
+                "━━━".dimmed(),
                 elapsed.as_secs_f64(),
-                format!("{:.1}", tokens_per_sec).bright_black(),
-                time_to_first_token.to_string().bright_green()
+                response.completion_tokens.to_string().cyan(),
+                prompt_str,
+                tokens_per_sec,
+                time_to_first_token.to_string().green()
             );
         } else {
             // Show partial stats for interrupted stream
             let word_count = accumulated_response.split_whitespace().count();
             println!(
                 "{} {} | ~{} words | TTFT: {}ms\n",
-                "─↴─".bright_black(),
+                "━━┛".dimmed(),
                 "partial".yellow(),
                 word_count,
-                if first_token_received { time_to_first_token.to_string() } else { "-".to_string() }
+                if first_token_received { time_to_first_token.to_string().green() } else { "−".bright_black() }
             );
         }
     }
@@ -2667,7 +2755,7 @@ async fn generate_ide_config(ide: &DetectedIDE, port: u16) -> Result<String> {
 /// Handle IDE setup command
 async fn handle_ide_setup() -> Result<()> {
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== IDE Setup ==={RESET}");
+    println!("{CYAN}{BOLD}=== IDE Setup ==={RESET}");
     println!();
     println!("{DIM}Detecting installed IDEs...{RESET}");
     println!();
@@ -2675,7 +2763,7 @@ async fn handle_ide_setup() -> Result<()> {
     let ides = detect_ides();
 
     if ides.is_empty() {
-        println!("{YELLOW}[!]{RESET} No supported IDEs detected.");
+        println!("{YELLOW}⚠{RESET} No supported IDEs detected.");
         println!();
         println!("Supported IDEs:");
         println!("  - VS Code (install from https://code.visualstudio.com)");
@@ -2697,7 +2785,7 @@ async fn handle_ide_setup() -> Result<()> {
     let port = config.port.unwrap_or(DEFAULT_PORT);
 
     if !check_server_running(port) {
-        println!("{YELLOW}[!]{RESET} rigrun server is not running on port {}", port);
+        println!("{YELLOW}⚠{RESET} rigrun server is not running on port {}", port);
         println!();
         println!("To use this feature, start the server first:");
         println!("  {CYAN}rigrun{RESET}");
@@ -2721,19 +2809,19 @@ async fn handle_ide_setup() -> Result<()> {
         Ok(s) => s,
         Err(_) => {
             println!();
-            println!("{YELLOW}[!]{RESET} Selection cancelled.");
+            println!("{YELLOW}⚠{RESET} Selection cancelled.");
             return Ok(());
         }
     };
 
     if selected.is_empty() {
         println!();
-        println!("{YELLOW}[!]{RESET} No IDEs selected.");
+        println!("{YELLOW}⚠{RESET} No IDEs selected.");
         return Ok(());
     }
 
     println!();
-    println!("{CYAN}[...]{RESET} Generating configurations with your local AI...");
+    println!("{CYAN}⋯{RESET} Generating configurations with your local AI...");
     println!();
 
     // Generate configurations for selected IDEs
@@ -2743,7 +2831,7 @@ async fn handle_ide_setup() -> Result<()> {
             continue;
         };
 
-        println!("{BRIGHT_CYAN}{BOLD}Configuration for {}:{RESET}", ide.display_name);
+        println!("{CYAN}{BOLD}Configuration for {}:{RESET}", ide.display_name);
         println!();
 
         match generate_ide_config(ide, port).await {
@@ -2804,7 +2892,7 @@ async fn handle_ide_setup() -> Result<()> {
                             println!("{GREEN}[✓]{RESET} Configuration written to {}", config_path.display());
                             println!();
                         } else {
-                            println!("{YELLOW}[!]{RESET} Skipped automatic configuration. You can add it manually.");
+                            println!("{YELLOW}⚠{RESET} Skipped automatic configuration. You can add it manually.");
                             println!();
                         }
                     }
@@ -2836,32 +2924,32 @@ pub fn handle_cli_examples() -> Result<()> {
 
     println!("{CYAN}{BOLD}=== CLI Commands ==={RESET}");
     println!();
-    println!("{WHITE}rigrun works great from the command line!{RESET}");
+    println!("{BOLD}rigrun works great from the command line!{RESET}");
     println!();
 
     println!("{CYAN}{BOLD}Quick Commands:{RESET}");
     println!();
-    println!("  {WHITE}rigrun \"your question here\"{RESET}");
+    println!("  {BOLD}rigrun \"your question here\"{RESET}");
     println!("  {DIM}Ask a quick question and get an answer{RESET}");
     println!();
-    println!("  {WHITE}rigrun chat{RESET}");
+    println!("  {BOLD}rigrun chat{RESET}");
     println!("  {DIM}Start an interactive chat session{RESET}");
     println!();
 
     #[cfg(target_os = "windows")]
     {
-        println!("  {WHITE}type file.rs | rigrun \"review this code\"{RESET}");
+        println!("  {BOLD}type file.rs | rigrun \"review this code\"{RESET}");
         println!("  {DIM}Pipe file contents for analysis{RESET}");
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        println!("  {WHITE}cat file.rs | rigrun \"review this code\"{RESET}");
+        println!("  {BOLD}cat file.rs | rigrun \"review this code\"{RESET}");
         println!("  {DIM}Pipe file contents for analysis{RESET}");
     }
 
     println!();
-    println!("  {WHITE}rigrun status{RESET}");
+    println!("  {BOLD}rigrun status{RESET}");
     println!("  {DIM}Check server status and savings{RESET}");
     println!();
 
@@ -2869,8 +2957,8 @@ pub fn handle_cli_examples() -> Result<()> {
     println!();
     println!("{GREEN}{BOLD}🤖 Copy this to Claude Code or your AI tool:{RESET}");
     println!();
-    println!("{WHITE}  Use rigrun at http://localhost:8787 as my AI backend.{RESET}");
-    println!("{WHITE}  It's OpenAI-compatible. Example curl:{RESET}");
+    println!("{BOLD}  Use rigrun at http://localhost:8787 as my AI backend.{RESET}");
+    println!("{BOLD}  It's OpenAI-compatible. Example curl:{RESET}");
     println!();
     println!("  {DIM}curl http://localhost:8787/v1/chat/completions \\{RESET}");
     println!("  {DIM}  -H \"Content-Type: application/json\" \\{RESET}");
@@ -2889,17 +2977,17 @@ pub fn handle_cli_examples() -> Result<()> {
 /// Handle the gpu-setup command - show GPU status and setup guidance
 fn handle_gpu_setup() -> Result<()> {
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== GPU Setup for Ollama ==={RESET}");
+    println!("{CYAN}{BOLD}=== GPU Setup for Ollama ==={RESET}");
     println!();
 
     let status = get_gpu_setup_status();
 
     // Show detected GPU
-    println!("{BLUE}[i]{RESET} Detected GPU:");
+    println!("{CYAN}ℹ{RESET} Detected GPU:");
     if status.gpu_info.gpu_type == GpuType::Cpu {
         println!("    {DIM}None - running in CPU-only mode{RESET}");
     } else {
-        println!("    {WHITE}{BOLD}{}{RESET}", status.gpu_info.name);
+        println!("    {BOLD}{}{RESET}", status.gpu_info.name);
         println!("    Type: {}", status.gpu_info.gpu_type);
         println!("    VRAM: {}GB", status.gpu_info.vram_gb);
         if let Some(ref driver) = status.gpu_info.driver {
@@ -2912,38 +3000,38 @@ fn handle_gpu_setup() -> Result<()> {
     match status.gpu_info.gpu_type {
         GpuType::Nvidia => {
             if let Some(ref driver) = status.nvidia_driver {
-                println!("{BLUE}[i]{RESET} NVIDIA Driver: {}", driver);
+                println!("{CYAN}ℹ{RESET} NVIDIA Driver: {}", driver);
                 if rigrun::detect::is_nvidia_driver_recent(driver) {
-                    println!("    {GREEN}[OK]{RESET} Driver version is recent enough for Ollama");
+                    println!("    {GREEN}✓{RESET} Driver version is recent enough for Ollama");
                 } else {
-                    println!("    {YELLOW}[!]{RESET} Driver may be outdated - consider updating to 470+");
+                    println!("    {YELLOW}⚠{RESET} Driver may be outdated - consider updating to 470+");
                 }
             }
             if rigrun::detect::check_nvidia_smi_available() {
-                println!("    {GREEN}[OK]{RESET} nvidia-smi is available");
+                println!("    {GREEN}✓{RESET} nvidia-smi is available");
             } else {
-                println!("    {RED}[X]{RESET} nvidia-smi is not available");
+                println!("    {RED}✗{RESET} nvidia-smi is not available");
             }
         }
         GpuType::Amd => {
             if let Some(ref arch) = status.amd_architecture {
-                println!("{BLUE}[i]{RESET} AMD Architecture: {}", arch);
+                println!("{CYAN}ℹ{RESET} AMD Architecture: {}", arch);
 
                 // Special note for RDNA 4
                 if *arch == AmdArchitecture::Rdna4 {
-                    println!("    {GREEN}[i]{RESET} RDNA 4 works with Vulkan backend (set OLLAMA_VULKAN=1)");
+                    println!("    {GREEN}ℹ{RESET} RDNA 4 works with Vulkan backend (set OLLAMA_VULKAN=1)");
                 }
             }
 
             if status.rocm_installed {
-                println!("    {GREEN}[OK]{RESET} ROCm/HIP is installed");
+                println!("    {GREEN}✓{RESET} ROCm/HIP is installed");
             } else {
-                println!("    {YELLOW}[!]{RESET} ROCm/HIP not detected");
+                println!("    {YELLOW}⚠{RESET} ROCm/HIP not detected");
             }
 
             // Show HSA override hint if applicable
             if let Some(hsa_version) = rigrun::detect::get_hsa_override_version(&status.gpu_info.name) {
-                println!("    {BLUE}[i]{RESET} Suggested HSA_OVERRIDE_GFX_VERSION: {}", hsa_version);
+                println!("    {CYAN}ℹ{RESET} Suggested HSA_OVERRIDE_GFX_VERSION: {}", hsa_version);
             }
         }
         _ => {}
@@ -2960,7 +3048,7 @@ fn handle_gpu_setup() -> Result<()> {
         } else {
             GREEN
         };
-        println!("{BLUE}[i]{RESET} VRAM Usage:");
+        println!("{CYAN}ℹ{RESET} VRAM Usage:");
         println!(
             "    {usage_color}{}MB{RESET} / {}MB ({usage_color}{:.1}%{RESET})",
             usage.used_mb, usage.total_mb, usage_pct
@@ -2972,22 +3060,22 @@ fn handle_gpu_setup() -> Result<()> {
     }
 
     // Show GPU acceleration status
-    println!("{BRIGHT_CYAN}{BOLD}=== GPU Acceleration Status ==={RESET}");
+    println!("{CYAN}{BOLD}=== GPU Acceleration Status ==={RESET}");
     println!();
 
     if status.gpu_working {
-        println!("{GREEN}[OK]{RESET} GPU acceleration appears to be working!");
+        println!("{GREEN}✓{RESET} GPU acceleration appears to be working!");
     } else if status.gpu_info.gpu_type == GpuType::Cpu {
-        println!("{YELLOW}[!]{RESET} No GPU detected - Ollama will use CPU only");
+        println!("{YELLOW}⚠{RESET} No GPU detected - Ollama will use CPU only");
         println!("    {DIM}This will be slower than GPU inference{RESET}");
     } else {
-        println!("{YELLOW}[!]{RESET} GPU detected but acceleration may not be working");
+        println!("{YELLOW}⚠{RESET} GPU detected but acceleration may not be working");
     }
     println!();
 
     // Show loaded models and their GPU status
     if !status.loaded_models.is_empty() {
-        println!("{BRIGHT_CYAN}{BOLD}=== Loaded Models ==={RESET}");
+        println!("{CYAN}{BOLD}=== Loaded Models ==={RESET}");
         println!();
         for model in &status.loaded_models {
             let processor_color = match &model.processor {
@@ -2997,7 +3085,7 @@ fn handle_gpu_setup() -> Result<()> {
                 _ => YELLOW,
             };
             println!(
-                "  {WHITE}{BOLD}{}{RESET} ({}) - {processor_color}{}{RESET}",
+                "  {BOLD}{}{RESET} ({}) - {processor_color}{}{RESET}",
                 model.name, model.size, model.processor
             );
         }
@@ -3006,7 +3094,7 @@ fn handle_gpu_setup() -> Result<()> {
 
     // Show guidance if there are issues
     if let Some(ref guidance) = status.guidance {
-        println!("{BRIGHT_CYAN}{BOLD}=== Setup Guidance ==={RESET}");
+        println!("{CYAN}{BOLD}=== Setup Guidance ==={RESET}");
         println!();
         println!("{YELLOW}Issue:{RESET} {}", guidance.issue);
         println!();
@@ -3019,7 +3107,7 @@ fn handle_gpu_setup() -> Result<()> {
                 if cmd.starts_with('#') {
                     println!("  {DIM}{}{RESET}", cmd);
                 } else {
-                    println!("  {WHITE}{}{RESET}", cmd);
+                    println!("  {BOLD}{}{RESET}", cmd);
                 }
             }
             println!();
@@ -3028,19 +3116,19 @@ fn handle_gpu_setup() -> Result<()> {
         if !guidance.links.is_empty() {
             println!("{CYAN}Helpful links:{RESET}");
             for link in &guidance.links {
-                println!("  {BLUE}{}{RESET}", link);
+                println!("  {CYAN}{}{RESET}", link);
             }
             println!();
         }
     } else {
-        println!("{GREEN}[OK]{RESET} No setup issues detected!");
+        println!("{GREEN}✓{RESET} No setup issues detected!");
         println!();
     }
 
     // Show recommended model for this GPU
     if status.gpu_info.vram_gb > 0 {
         let recommended = recommend_model(status.gpu_info.vram_gb);
-        println!("{BLUE}[i]{RESET} Recommended model for {}GB VRAM: {CYAN}{}{RESET}", status.gpu_info.vram_gb, recommended);
+        println!("{CYAN}ℹ{RESET} Recommended model for {}GB VRAM: {CYAN}{}{RESET}", status.gpu_info.vram_gb, recommended);
         println!("    To use: {CYAN}rigrun config --model {}{RESET}", recommended);
         println!();
     }
@@ -3085,7 +3173,7 @@ async fn handle_ask(question: Option<&str>, model: Option<&str>, file: Option<&s
 
     // Display what context was included
     for msg in &context_messages {
-        eprintln!("{}", msg.bright_blue());
+        eprintln!("{}", msg.cyan());
     }
     if !context_messages.is_empty() {
         eprintln!(); // Extra line after context messages
@@ -3133,7 +3221,7 @@ fn handle_cache(command: CacheCommands) -> Result<()> {
     match command {
         CacheCommands::Stats => {
             println!();
-            println!("{BRIGHT_CYAN}{BOLD}=== Cache Statistics ==={RESET}");
+            println!("{CYAN}{BOLD}=== Cache Statistics ==={RESET}");
             println!();
 
             let cache_dir = dirs::data_dir()
@@ -3147,8 +3235,8 @@ fn handle_cache(command: CacheCommands) -> Result<()> {
                 let entry_count = cache_content.matches("query_hash").count();
                 let file_size = cache_content.len();
 
-                println!("  Cache entries:  {WHITE}{BOLD}{}{RESET}", entry_count);
-                println!("  Cache size:     {WHITE}{}{RESET} bytes ({:.2} KB)", file_size, file_size as f64 / 1024.0);
+                println!("  Cache entries:  {BOLD}{}{RESET}", entry_count);
+                println!("  Cache size:     {BOLD}{}{RESET} bytes ({:.2} KB)", file_size, file_size as f64 / 1024.0);
                 println!("  Cache location: {DIM}{}{RESET}", cache_file.display());
             } else {
                 println!("  {DIM}No cache data found{RESET}");
@@ -3158,7 +3246,7 @@ fn handle_cache(command: CacheCommands) -> Result<()> {
         }
         CacheCommands::Clear => {
             println!();
-            println!("{BRIGHT_CYAN}{BOLD}=== Clear Cache ==={RESET}");
+            println!("{CYAN}{BOLD}=== Clear Cache ==={RESET}");
             println!();
 
             let cache_dir = dirs::data_dir()
@@ -3171,7 +3259,7 @@ fn handle_cache(command: CacheCommands) -> Result<()> {
                 fs::remove_file(&cache_file)?;
                 println!("{GREEN}[✓]{RESET} Cache cleared successfully");
             } else {
-                println!("{YELLOW}[!]{RESET} No cache to clear");
+                println!("{YELLOW}⚠{RESET} No cache to clear");
             }
 
             println!();
@@ -3187,7 +3275,7 @@ fn handle_cache(command: CacheCommands) -> Result<()> {
 /// Handle the export command - export cached data and audit log
 fn handle_export(output_dir: Option<PathBuf>) -> Result<()> {
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== RigRun Data Export ==={RESET}");
+    println!("{CYAN}{BOLD}=== RigRun Data Export ==={RESET}");
     println!();
 
     let output_dir = output_dir.unwrap_or_else(|| PathBuf::from("."));
@@ -3216,7 +3304,7 @@ fn handle_export(output_dir: Option<PathBuf>) -> Result<()> {
         let size = cache_content.len() as u64;
         total_size += size;
         files_exported.push((export_cache_path.display().to_string(), size));
-        println!("  {GREEN}[OK]{RESET} Cache exported ({} entries)",
+        println!("  {GREEN}✓{RESET} Cache exported ({} entries)",
             cache_content.matches("query_hash").count());
     } else {
         println!("  {DIM}No cache data found{RESET}");
@@ -3237,7 +3325,7 @@ fn handle_export(output_dir: Option<PathBuf>) -> Result<()> {
         total_size += size;
         let line_count = audit_content.lines().count();
         files_exported.push((export_audit_path.display().to_string(), size));
-        println!("  {GREEN}[OK]{RESET} Audit log exported ({} entries)", line_count);
+        println!("  {GREEN}✓{RESET} Audit log exported ({} entries)", line_count);
     } else {
         println!("  {DIM}No audit log found{RESET}");
     }
@@ -3256,27 +3344,27 @@ fn handle_export(output_dir: Option<PathBuf>) -> Result<()> {
         let size = stats_content.len() as u64;
         total_size += size;
         files_exported.push((export_stats_path.display().to_string(), size));
-        println!("  {GREEN}[OK]{RESET} Statistics exported");
+        println!("  {GREEN}✓{RESET} Statistics exported");
     } else {
         println!("  {DIM}No statistics found{RESET}");
     }
 
     // Summary
     println!();
-    println!("{BRIGHT_CYAN}{BOLD}=== Export Summary ==={RESET}");
+    println!("{CYAN}{BOLD}=== Export Summary ==={RESET}");
     println!();
 
     if files_exported.is_empty() {
-        println!("{YELLOW}[!]{RESET} No data to export. Use rigrun to generate some data first.");
+        println!("{YELLOW}⚠{RESET} No data to export. Use rigrun to generate some data first.");
     } else {
         println!("  Files exported:");
         for (path, size) in &files_exported {
-            println!("    {GREEN}[OK]{RESET} {} ({} bytes)", path, size);
+            println!("    {GREEN}✓{RESET} {} ({} bytes)", path, size);
         }
         println!();
         println!("  Total size: {} bytes", total_size);
         println!();
-        println!("{GREEN}[OK]{RESET} Export complete!");
+        println!("{GREEN}✓{RESET} Export complete!");
         println!();
         println!("{DIM}Your data is yours. These files can be used for:");
         println!("  - Backup and restoration");
@@ -3291,15 +3379,7 @@ fn handle_export(output_dir: Option<PathBuf>) -> Result<()> {
 
 /// Print paranoid mode warning banner
 fn print_paranoid_banner() {
-    println!();
-    println!("{RED}{BOLD}============================================{RESET}");
-    println!("{RED}{BOLD}          PARANOID MODE ENABLED            {RESET}");
-    println!("{RED}{BOLD}============================================{RESET}");
-    println!("{YELLOW}[!]{RESET} All cloud requests are BLOCKED");
-    println!("{YELLOW}[!]{RESET} Only local inference and cache will be used");
-    println!("{YELLOW}[!]{RESET} Your data NEVER leaves your machine");
-    println!("{RED}{BOLD}============================================{RESET}");
-    println!();
+    println!("{YELLOW}[🔒 PARANOID]{RESET} Local-only mode active - no cloud routing");
 }
 
 /// Run comprehensive diagnostic checks on the system.
@@ -3323,29 +3403,29 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     // Display Ollama status
     if status.ollama_running {
         let version = status.ollama_version.as_deref().unwrap_or("unknown");
-        println!("{} Ollama: Running (v{})", "[OK]".green(), version);
+        println!("{} Ollama: Running (v{})", "✓".green(), version);
     } else {
-        println!("{} Ollama: Not running", "[X]".red());
+        println!("{} Ollama: Not running", "✗".red());
         println!("   {} Start Ollama: ollama serve", "Fix:".yellow());
     }
 
     // Display Model status
     if let Some(ref model) = status.model_name {
         if status.model_loaded {
-            println!("{} Model: {} loaded", "[OK]".green(), model);
+            println!("{} Model: {} loaded", "✓".green(), model);
         } else if status.model_downloaded {
-            println!("{} Model: {} available (not loaded)", "[OK]".green(), model);
+            println!("{} Model: {} available (not loaded)", "✓".green(), model);
         } else {
-            println!("{} Model: {} not downloaded", "[X]".red(), model);
+            println!("{} Model: {} not downloaded", "✗".red(), model);
             println!("   {} ollama pull {}", "Fix:".yellow(), model);
         }
     } else {
         let available_models = rigrun::detect::list_ollama_models();
         if available_models.is_empty() {
-            println!("{} Model: No models downloaded", "[!]".yellow());
+            println!("{} Model: No models downloaded", "⚠".yellow());
             println!("   {} ollama pull qwen2.5-coder:7b", "Fix:".yellow());
         } else {
-            println!("{} Model: {} models available", "[OK]".green(), available_models.len());
+            println!("{} Model: {} models available", "✓".green(), available_models.len());
         }
     }
 
@@ -3353,14 +3433,14 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     if let Some(ref gpu) = status.gpu_info {
         let vram_info = format!("{}GB VRAM", gpu.vram_gb);
         if status.gpu_in_use {
-            println!("{} GPU: {} ({}, {})", "[OK]".green(), gpu.name, gpu.gpu_type, vram_info);
+            println!("{} GPU: {} ({}, {})", "✓".green(), gpu.name, gpu.gpu_type, vram_info);
         } else if status.gpu_detected {
-            println!("{} GPU: {} (detected but not in use)", "[!]".yellow(), gpu.name);
+            println!("{} GPU: {} (detected but not in use)", "⚠".yellow(), gpu.name);
         } else {
-            println!("{} GPU: {} ({})", "[OK]".green(), gpu.name, vram_info);
+            println!("{} GPU: {} ({})", "✓".green(), gpu.name, vram_info);
         }
     } else if !status.gpu_detected {
-        println!("{} GPU: None detected (CPU mode)", "[!]".yellow());
+        println!("{} GPU: None detected (CPU mode)", "⚠".yellow());
         println!("   {} Install GPU drivers or run 'rigrun setup gpu'", "Fix:".yellow());
     }
 
@@ -3368,21 +3448,21 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     if let (Some(used), Some(percent)) = (status.vram_used_mb, status.vram_usage_percent) {
         let total = status.vram_used_mb.unwrap_or(0) + status.vram_available_mb.unwrap_or(0);
         if percent >= 95.0 {
-            println!("{} VRAM: {:.1}% used ({}/{}MB) - critically low!", "[X]".red(), percent, used, total);
+            println!("{} VRAM: {:.1}% used ({}/{}MB) - critically low!", "✗".red(), percent, used, total);
             println!("   {} Consider using a smaller model", "Fix:".yellow());
         } else if percent >= 85.0 {
-            println!("{} VRAM: {:.1}% used ({}/{}MB)", "[!]".yellow(), percent, used, total);
+            println!("{} VRAM: {:.1}% used ({}/{}MB)", "⚠".yellow(), percent, used, total);
             println!("   {} Consider using a smaller model if experiencing slowdowns", "Tip:".cyan());
         } else {
-            println!("{} VRAM: {:.1}% used ({}/{}MB)", "[OK]".green(), percent, used, total);
+            println!("{} VRAM: {:.1}% used ({}/{}MB)", "✓".green(), percent, used, total);
         }
     }
 
     // Display Config status
     if status.config_valid {
-        println!("{} Config: Valid", "[OK]".green());
+        println!("{} Config: Valid", "✓".green());
     } else {
-        println!("{} Config: Invalid", "[X]".red());
+        println!("{} Config: Invalid", "✗".red());
         for issue in &status.config_issues {
             println!("   {} {}", "Issue:".yellow(), issue);
         }
@@ -3391,9 +3471,9 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     // Display Disk space status
     if let Some(space) = status.disk_space_gb {
         if space >= 10 {
-            println!("{} Disk: {}GB available", "[OK]".green(), space);
+            println!("{} Disk: {}GB available", "✓".green(), space);
         } else {
-            println!("{} Disk: {}GB available (low)", "[!]".yellow(), space);
+            println!("{} Disk: {}GB available (low)", "⚠".yellow(), space);
             println!("   {} Free up disk space for model storage", "Fix:".yellow());
         }
     }
@@ -3401,9 +3481,9 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     // Display Network status (if checked)
     if let Some(available) = status.network_available {
         if available {
-            println!("{} Network: Cloud APIs reachable", "[OK]".green());
+            println!("{} Network: Cloud APIs reachable", "✓".green());
         } else {
-            println!("{} Network: Cloud APIs unreachable", "[!]".yellow());
+            println!("{} Network: Cloud APIs unreachable", "⚠".yellow());
             println!("   {} Check internet connection for cloud fallback", "Note:".cyan());
         }
     }
@@ -3411,9 +3491,9 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     // Display port availability
     print!("Checking port 8787... ");
     match check_port_available(8787) {
-        Ok(_) => println!("{}", "[OK]".green()),
+        Ok(_) => println!("{}", "✓".green()),
         Err(e) => {
-            println!("{} {}", "[!]".yellow(), e);
+            println!("{} {}", "⚠".yellow(), e);
         }
     }
 
@@ -3431,9 +3511,9 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
 
             for issue in &status.issues {
                 let icon = match issue.severity {
-                    Severity::Critical => "[X]".red(),
-                    Severity::Warning => "[!]".yellow(),
-                    Severity::Info => "[i]".cyan(),
+                    Severity::Critical => "✗".red(),
+                    Severity::Warning => "⚠".yellow(),
+                    Severity::Info => "ℹ".cyan(),
                 };
                 println!("{} {}: {}", icon, issue.component.bold(), issue.message);
                 println!("   {} {}", "Fix:".yellow(), issue.fix);
@@ -3462,8 +3542,8 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
                 let results = auto_fix_issues(&fixable);
                 for (cmd, result) in results {
                     match result {
-                        Ok(_) => println!("{} Fixed: {}", "[OK]".green(), cmd),
-                        Err(e) => println!("{} Failed: {} - {}", "[X]".red(), cmd, e),
+                        Ok(_) => println!("{} Fixed: {}", "✓".green(), cmd),
+                        Err(e) => println!("{} Failed: {} - {}", "✗".red(), cmd, e),
                     }
                 }
             }
@@ -3481,6 +3561,8 @@ async fn run_doctor(auto_fix: bool, check_network: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Check Ollama installation - reserved for future health check functionality
+#[allow(dead_code)]
 fn check_ollama_installed() -> anyhow::Result<String> {
     let output = std::process::Command::new("ollama")
         .arg("--version")
@@ -3491,6 +3573,8 @@ fn check_ollama_installed() -> anyhow::Result<String> {
     Ok(version.trim().to_string())
 }
 
+/// Check if Ollama is running - reserved for future health check functionality
+#[allow(dead_code)]
 async fn check_ollama_running() -> anyhow::Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
@@ -3504,6 +3588,8 @@ async fn check_ollama_running() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Check if config is initialized - reserved for future health check functionality
+#[allow(dead_code)]
 fn check_config() -> anyhow::Result<()> {
     let config_dir = dirs::config_dir()
         .ok_or_else(|| anyhow::anyhow!("Cannot find config directory"))?
@@ -3539,14 +3625,14 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
                 if quick_setup {
                     // Quick setup mode - minimal prompts
                     if let Err(e) = run_quick_wizard().await {
-                        eprintln!("{YELLOW}[!]{RESET} Quick setup error: {}", e);
-                        eprintln!("{YELLOW}[!]{RESET} You can run 'rigrun setup' manually to configure.");
+                        eprintln!("{YELLOW}⚠{RESET} Quick setup error: {}", e);
+                        eprintln!("{YELLOW}⚠{RESET} You can run 'rigrun setup' manually to configure.");
                     }
                 } else {
                     // Full interactive wizard
                     if let Err(e) = run_wizard().await {
-                        eprintln!("{YELLOW}[!]{RESET} Wizard error: {}", e);
-                        eprintln!("{YELLOW}[!]{RESET} You can run 'rigrun setup' manually to configure.");
+                        eprintln!("{YELLOW}⚠{RESET} Wizard error: {}", e);
+                        eprintln!("{YELLOW}⚠{RESET} You can run 'rigrun setup' manually to configure.");
                     }
                 }
 
@@ -3564,14 +3650,14 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
                 start_server(config).await?;
             } else if no_wizard && is_first_run() {
                 // First run but wizard skipped - use defaults
-                println!("{YELLOW}[!]{RESET} First run wizard skipped (--no-wizard flag)");
-                println!("{YELLOW}[!]{RESET} Using default configuration. Run {CYAN}rigrun setup{RESET} later to configure.");
+                println!("{YELLOW}⚠{RESET} First run wizard skipped (--no-wizard flag)");
+                println!("{YELLOW}⚠{RESET} Using default configuration. Run {CYAN}rigrun setup{RESET} later to configure.");
                 println!();
 
                 // Mark first run complete with defaults
                 config.first_run_complete = true;
                 if let Err(e) = save_config(config) {
-                    eprintln!("{YELLOW}[!]{RESET} Failed to save config: {}", e);
+                    eprintln!("{YELLOW}⚠{RESET} Failed to save config: {}", e);
                 }
 
                 clear_screen();
@@ -3614,7 +3700,7 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
                     }
                 }
                 Err(e) => {
-                    eprintln!("{RED}[!]{RESET} Setup failed: {}", e);
+                    eprintln!("{RED}⚠{RESET} Setup failed: {}", e);
                     std::process::exit(CONFIG);
                 }
             }
@@ -3625,12 +3711,12 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
 
             if quick {
                 if let Err(e) = run_quick_wizard().await {
-                    eprintln!("{RED}[!]{RESET} Quick wizard failed: {}", e);
+                    eprintln!("{RED}⚠{RESET} Quick wizard failed: {}", e);
                     std::process::exit(CONFIG);
                 }
             } else {
                 if let Err(e) = run_wizard().await {
-                    eprintln!("{RED}[!]{RESET} Wizard failed: {}", e);
+                    eprintln!("{RED}⚠{RESET} Wizard failed: {}", e);
                     std::process::exit(CONFIG);
                 }
             }
@@ -3647,6 +3733,8 @@ enum AsyncCommand {
     Doctor { fix: bool, check_network: bool },
     Pull { model: String },
     UnifiedSetup { quick: bool, full: bool, hardware: Option<String> },
+    /// Reserved for future use - currently replaced by UnifiedSetup
+    #[allow(dead_code)]
     RunWizard { quick: bool },
 }
 
@@ -3665,14 +3753,14 @@ fn main() -> Result<()> {
 
     // Initialize audit logging based on config
     if let Err(e) = rigrun::init_audit_logger(config.audit_log_enabled) {
-        eprintln!("{YELLOW}[!]{RESET} Failed to initialize audit logging: {}", e);
+        eprintln!("{YELLOW}⚠{RESET} Failed to initialize audit logging: {}", e);
     }
 
     // DoD Consent Banner - IL5 REQUIREMENT
     // Must be displayed and acknowledged before system use (unless explicitly skipped)
     if let Err(e) = consent_banner::handle_consent_banner(cli.skip_banner, config.dod_banner_enabled) {
-        eprintln!("{RED}[!]{RESET} Failed to handle DoD consent banner: {}", e);
-        eprintln!("{RED}[!]{RESET} Cannot proceed without consent acknowledgment.");
+        eprintln!("{RED}⚠{RESET} Failed to handle DoD consent banner: {}", e);
+        eprintln!("{RED}⚠{RESET} Cannot proceed without consent acknowledgment.");
         std::process::exit(ERROR);
     }
 

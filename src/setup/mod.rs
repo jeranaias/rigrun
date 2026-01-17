@@ -313,9 +313,9 @@ impl SetupWizard {
 
         for prereq in &prereqs {
             if prereq.passed {
-                println!("  {GREEN}[OK]{RESET} {}: {}", prereq.name, prereq.message);
+                println!("  {GREEN}✓{RESET} {}: {}", prereq.name, prereq.message);
             } else {
-                println!("  {RED}[X]{RESET} {}: {}", prereq.name, prereq.message);
+                println!("  {RED}✗{RESET} {}: {}", prereq.name, prereq.message);
                 if let Some(ref hint) = prereq.fix_hint {
                     println!("      {DIM}Fix: {}{RESET}", hint);
                 }
@@ -324,7 +324,7 @@ impl SetupWizard {
 
         if !all_passed {
             println!();
-            println!("{RED}[!]{RESET} Some prerequisites failed. Please fix them and try again.");
+            println!("{RED}⚠{RESET} Some prerequisites failed. Please fix them and try again.");
             return Ok(SetupResult {
                 success: false,
                 config_path: self.config_dir.join("config.toml"),
@@ -348,7 +348,7 @@ impl SetupWizard {
         println!("{CYAN}[3/6]{RESET} Generating configuration...");
         let config = self.generate_config(&gpu_info, &hardware_config)?;
         let config_path = self.save_config(&config)?;
-        println!("  {GREEN}[OK]{RESET} Configuration saved to: {}", config_path.display());
+        println!("  {GREEN}✓{RESET} Configuration saved to: {}", config_path.display());
         println!();
 
         // Step 4: Download required model
@@ -360,10 +360,10 @@ impl SetupWizard {
         println!("{CYAN}[5/6]{RESET} Verifying system health...");
         let health_warnings = self.verify_health(&config)?;
         for warning in &health_warnings {
-            println!("  {YELLOW}[!]{RESET} {}", warning);
+            println!("  {YELLOW}⚠{RESET} {}", warning);
         }
         if health_warnings.is_empty() {
-            println!("  {GREEN}[OK]{RESET} All health checks passed");
+            println!("  {GREEN}✓{RESET} All health checks passed");
         }
         println!();
 
@@ -781,27 +781,27 @@ impl SetupWizard {
 
     fn print_hardware_info(&self, gpu: &GpuInfo, config: &HardwareConfig) {
         if gpu.gpu_type == GpuType::Cpu {
-            println!("  {BLUE}[i]{RESET} GPU: {DIM}None detected (CPU mode){RESET}");
+            println!("  {BLUE}ℹ{RESET} GPU: {DIM}None detected (CPU mode){RESET}");
         } else {
-            println!("  {GREEN}[OK]{RESET} GPU: {WHITE}{BOLD}{}{RESET}", gpu.name);
-            println!("  {BLUE}[i]{RESET} VRAM: {}GB", gpu.vram_gb);
+            println!("  {GREEN}✓{RESET} GPU: {WHITE}{BOLD}{}{RESET}", gpu.name);
+            println!("  {BLUE}ℹ{RESET} VRAM: {}GB", gpu.vram_gb);
 
             if let Some(ref driver) = gpu.driver {
-                println!("  {BLUE}[i]{RESET} Driver: {}", driver);
+                println!("  {BLUE}ℹ{RESET} Driver: {}", driver);
             }
 
             if config.use_vulkan {
-                println!("  {BLUE}[i]{RESET} Backend: Vulkan (RDNA 4 optimized)");
+                println!("  {BLUE}ℹ{RESET} Backend: Vulkan (RDNA 4 optimized)");
             }
 
             if let Some(ref hsa) = config.hsa_override {
-                println!("  {BLUE}[i]{RESET} HSA Override: {}", hsa);
+                println!("  {BLUE}ℹ{RESET} HSA Override: {}", hsa);
             }
 
-            println!("  {BLUE}[i]{RESET} Batch Size: {}", config.batch_size);
+            println!("  {BLUE}ℹ{RESET} Batch Size: {}", config.batch_size);
 
             if let Some(layers) = config.gpu_layers {
-                println!("  {BLUE}[i]{RESET} GPU Layers: {}", layers);
+                println!("  {BLUE}ℹ{RESET} GPU Layers: {}", layers);
             }
         }
     }
@@ -909,11 +909,11 @@ impl SetupWizard {
     fn download_model(&self, model: &str) -> Result<String> {
         // Check if model already exists
         if is_model_available(model) {
-            println!("  {GREEN}[OK]{RESET} Model {WHITE}{BOLD}{}{RESET} already downloaded", model);
+            println!("  {GREEN}✓{RESET} Model {WHITE}{BOLD}{}{RESET} already downloaded", model);
             return Ok(model.to_string());
         }
 
-        println!("  {CYAN}[...]{RESET} Downloading {WHITE}{BOLD}{}{RESET}...", model);
+        println!("  {CYAN}⋯{RESET} Downloading {WHITE}{BOLD}{}{RESET}...", model);
 
         // Get approximate size for user info
         let size_info = get_model_size_info(model);
@@ -972,7 +972,7 @@ impl SetupWizard {
 
         pb.finish_and_clear();
         let elapsed = start.elapsed();
-        println!("  {GREEN}[OK]{RESET} Model downloaded in {:.0}s", elapsed.as_secs_f64());
+        println!("  {GREEN}✓{RESET} Model downloaded in {:.0}s", elapsed.as_secs_f64());
 
         Ok(model.to_string())
     }
@@ -996,7 +996,7 @@ impl SetupWizard {
         }
 
         // Run quick inference test
-        print!("  {CYAN}[...]{RESET} Running inference test...");
+        print!("  {CYAN}⋯{RESET} Running inference test...");
         io::stdout().flush().ok();
 
         let start = Instant::now();
@@ -1005,7 +1005,7 @@ impl SetupWizard {
 
         match result {
             Ok(_response) => {
-                println!("\r  {GREEN}[OK]{RESET} Inference test passed ({:.1}s)         ", elapsed.as_secs_f64());
+                println!("\r  {GREEN}✓{RESET} Inference test passed ({:.1}s)         ", elapsed.as_secs_f64());
 
                 // Check if response indicates GPU usage issues
                 if elapsed.as_secs() > 30 && config.hardware.vram_gb >= 8 {
@@ -1013,7 +1013,7 @@ impl SetupWizard {
                 }
             }
             Err(e) => {
-                println!("\r  {RED}[X]{RESET} Inference test failed                ");
+                println!("\r  {RED}✗{RESET} Inference test failed                ");
                 warnings.push(format!("Inference failed: {}. Check model with: ollama run {}", e, config.model.primary));
             }
         }
@@ -1043,18 +1043,18 @@ impl SetupWizard {
             format!("{} ({}GB VRAM)", gpu.name, gpu.vram_gb)
         };
 
-        println!("{GREEN}[OK]{RESET} Prerequisites checked");
-        println!("{GREEN}[OK]{RESET} Hardware detected: {WHITE}{BOLD}{}{RESET}", gpu_display);
-        println!("{GREEN}[OK]{RESET} Configuration generated: {WHITE}{}{RESET}", config_path.display());
-        println!("{GREEN}[OK]{RESET} Model downloaded: {WHITE}{BOLD}{}{RESET}", model);
-        println!("{GREEN}[OK]{RESET} Health check passed");
+        println!("{GREEN}✓{RESET} Prerequisites checked");
+        println!("{GREEN}✓{RESET} Hardware detected: {WHITE}{BOLD}{}{RESET}", gpu_display);
+        println!("{GREEN}✓{RESET} Configuration generated: {WHITE}{}{RESET}", config_path.display());
+        println!("{GREEN}✓{RESET} Model downloaded: {WHITE}{BOLD}{}{RESET}", model);
+        println!("{GREEN}✓{RESET} Health check passed");
         println!();
 
         // Environment variables to set (if needed)
         if gpu.gpu_type == GpuType::Amd {
             let arch = detect_amd_architecture(&gpu.name);
             if arch == AmdArchitecture::Rdna4 {
-                println!("{YELLOW}[!]{RESET} For best performance, set this environment variable:");
+                println!("{YELLOW}⚠{RESET} For best performance, set this environment variable:");
                 println!("    {CYAN}OLLAMA_VULKAN=1{RESET}");
                 println!();
             }

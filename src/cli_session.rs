@@ -267,15 +267,15 @@ impl CliSession {
             .replacen("{}", &minutes.to_string(), 1)
             .replacen("{}", &seconds.to_string(), 1);
 
-        eprintln!("\n{}", format!("[!] {}", message).yellow().bold());
+        eprintln!("\n{}", format!("⚠ {}", message).yellow().bold());
     }
 
     /// Show expiration message and return true if consent re-ack is required
     pub fn show_expiration(&self) -> bool {
-        eprintln!("\n{}", format!("[X] {}", self.config.expiration_message).red().bold());
+        eprintln!("\n{}", format!("✗ {}", self.config.expiration_message).red().bold());
 
         if self.config.require_consent_reack {
-            eprintln!("{}", "[!] You must re-acknowledge the consent banner to continue.".yellow());
+            eprintln!("{}", "⚠ You must re-acknowledge the consent banner to continue.".yellow());
         }
 
         self.config.require_consent_reack
