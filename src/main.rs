@@ -22,7 +22,7 @@ use crossterm::{
 use rigrun::detect::{
     detect_gpu, recommend_model, GpuInfo, GpuType, is_model_available, list_ollama_models,
     check_gpu_utilization, ProcessorType, get_gpu_status_report,
-    get_gpu_setup_status, AmdArchitecture,
+    get_gpu_setup_status, AmdArchitecture, detect_amd_architecture,
 };
 use rigrun::local::{OllamaClient, Message};
 use rigrun::cli::{InteractiveInput, show_help, show_command_menu};
@@ -713,6 +713,9 @@ async fn start_server(config: &Config) -> Result<()> {
         }
     };
 
+    // Ensure Ollama is running (auto-start if needed)
+    ensure_ollama_running(&gpu).await?;
+
     let model = config
         .model
         .clone()
@@ -1069,6 +1072,99 @@ fn list_models() -> Result<()> {
     println!();
 
     Ok(())
+}
+
+/// Ensure Ollama is running, auto-starting if needed with correct GPU settings
+async fn ensure_ollama_running(gpu: &GpuInfo) -> Result<()> {
+    // Check if Ollama is already running
+    if check_ollama_running_quick() {
+        println!("{GREEN}[✓]{RESET} Ollama: Running");
+        return Ok(());
+    }
+
+    // Ollama not running - auto-start it
+    println!("{YELLOW}[!]{RESET} Ollama not running, starting automatically...");
+
+    // Determine if we need Vulkan for RDNA 4
+    let needs_vulkan = gpu.gpu_type == GpuType::Amd && {
+        let arch = detect_amd_architecture(&gpu.name);
+        arch == AmdArchitecture::Rdna4
+    };
+
+    // Build the command with appropriate environment
+    let mut cmd = std::process::Command::new("ollama");
+    cmd.arg("serve");
+
+    if needs_vulkan {
+        cmd.env("OLLAMA_VULKAN", "1");
+        println!("{BLUE}[i]{RESET} RDNA 4 detected - enabling Vulkan backend");
+    }
+
+    // Start Ollama in background (detached)
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        cmd.stdout(std::process::Stdio::null());
+        cmd.stderr(std::process::Stdio::null());
+    }
+
+    match cmd.spawn() {
+        Ok(_) => {
+            // Wait for Ollama to be ready (up to 10 seconds)
+            print!("{DIM}Waiting for Ollama to start...{RESET}");
+            std::io::Write::flush(&mut std::io::stdout()).ok();
+
+            for i in 0..20 {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                if check_ollama_running_quick() {
+                    println!("\r{GREEN}[✓]{RESET} Ollama: Started successfully       ");
+                    return Ok(());
+                }
+                if i % 4 == 0 {
+                    print!(".");
+                    std::io::Write::flush(&mut std::io::stdout()).ok();
+                }
+            }
+
+            // Timeout - Ollama didn't start in time
+            println!("\r{RED}[✗]{RESET} Ollama failed to start within 10 seconds       ");
+            anyhow::bail!(
+                "Ollama failed to start. Please start manually:\n  \
+                 Windows: {}\n  \
+                 Linux/Mac: ollama serve",
+                if needs_vulkan {
+                    "set OLLAMA_VULKAN=1 && ollama serve"
+                } else {
+                    "ollama serve"
+                }
+            );
+        }
+        Err(e) => {
+            println!("{RED}[✗]{RESET} Failed to start Ollama: {}", e);
+            anyhow::bail!(
+                "Failed to start Ollama. Is it installed?\n  \
+                 Download from: https://ollama.ai/download"
+            );
+        }
+    }
+}
+
+/// Quick check if Ollama is running (no timeout, fast)
+fn check_ollama_running_quick() -> bool {
+    std::process::Command::new("ollama")
+        .arg("list")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 async fn pull_model(model: String) -> Result<()> {
