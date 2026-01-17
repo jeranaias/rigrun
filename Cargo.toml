@@ -91,11 +91,23 @@ rand = "0.8"
 # Regex for secret redaction
 regex = "1"
 
+# Unicode width calculation for proper column alignment
+unicode-width = "0.1"
+
+# Strip ANSI escape codes for display width calculation
+strip-ansi-escapes = "0.2"
+
 # Hostname detection for audit logging
 hostname = "0.3"
 
 # Interactive line editing with completion
 rustyline = "14.0"
+
+# Syntax highlighting for code blocks
+syntect = "5.0"
+
+# Progress spinners for better UX
+indicatif = "0.17"
 
 [[bin]]
 name = "rigrun"

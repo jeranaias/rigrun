@@ -10,6 +10,7 @@ use std::fs;
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::Instant;
 use crossterm::{
@@ -17,6 +18,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
     ExecutableCommand,
 };
+use unicode_width::UnicodeWidthStr;
 
 // Use the library's detect module
 use rigrun::detect::{
@@ -78,10 +80,181 @@ mod exit_codes {
 
 use exit_codes::*;
 
+/// Spinner helpers for consistent progress indicators
+mod spinner {
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    /// Create a spinner with consistent styling
+    pub fn create(message: &str) -> ProgressBar {
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .tick_chars("\u{28FB}\u{28F9}\u{28FC}\u{28F8}\u{28FE}\u{28F6}\u{28F7}\u{28E7}\u{28CF}\u{28DF} ")
+                .template("{spinner:.cyan} {msg}")
+                .unwrap()
+        );
+        spinner.set_message(message.to_string());
+        spinner.enable_steady_tick(Duration::from_millis(80));
+        spinner
+    }
+
+    /// Finish spinner with success message
+    pub fn finish_success(spinner: &ProgressBar, message: &str) {
+        spinner.finish_and_clear();
+        println!("\x1b[32m[OK]\x1b[0m {}", message);
+    }
+
+    /// Finish spinner with warning message
+    pub fn finish_warning(spinner: &ProgressBar, message: &str) {
+        spinner.finish_and_clear();
+        println!("\x1b[33m[!]\x1b[0m {}", message);
+    }
+
+    /// Finish spinner with error message
+    pub fn finish_error(spinner: &ProgressBar, message: &str) {
+        spinner.finish_and_clear();
+        println!("\x1b[31m[X]\x1b[0m {}", message);
+    }
+
+    /// Clear spinner silently (for use when transitioning to streaming output)
+    pub fn clear(spinner: &ProgressBar) {
+        spinner.finish_and_clear();
+    }
+}
+
 /// Clear the terminal screen
 fn clear_screen() {
     print!("\x1B[2J\x1B[1;1H");
     std::io::Write::flush(&mut std::io::stdout()).ok();
+}
+
+/// Strip ANSI escape codes from a string for accurate display width calculation
+fn strip_ansi_codes(s: &str) -> String {
+    let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    re.replace_all(s, "").to_string()
+}
+
+/// Calculate the display width of a string, accounting for ANSI escape codes and unicode
+fn display_width(s: &str) -> usize {
+    let stripped = strip_ansi_codes(s);
+    UnicodeWidthStr::width(stripped.as_str())
+}
+
+/// Pad a string to a target width, correctly accounting for ANSI escape codes
+/// This ensures columns align properly even when strings contain color codes
+fn pad_display(s: &str, target_width: usize) -> String {
+    let current_width = display_width(s);
+    if current_width >= target_width {
+        s.to_string()
+    } else {
+        format!("{}{}", s, " ".repeat(target_width - current_width))
+    }
+}
+
+/// Tracks code block state during streaming for syntax highlighting
+/// Handles token-by-token streaming where ``` may be split across chunks
+struct CodeBlockTracker {
+    in_code_block: bool,
+    pending_backticks: String,  // Buffer for partial ``` sequences
+    language: Option<String>,   // Language hint after opening ```
+    collecting_language: bool,  // True right after opening ``` to collect language
+}
+
+impl CodeBlockTracker {
+    fn new() -> Self {
+        Self {
+            in_code_block: false,
+            pending_backticks: String::new(),
+            language: None,
+            collecting_language: false,
+        }
+    }
+
+    /// Process a streaming token and print with appropriate styling
+    fn process_token(&mut self, token: &str) {
+        for ch in token.chars() {
+            if ch == '`' {
+                self.pending_backticks.push(ch);
+
+                // Check if we have a complete ``` sequence
+                if self.pending_backticks == "```" {
+                    self.toggle_code_block();
+                    self.pending_backticks.clear();
+                }
+            } else {
+                // Non-backtick character
+                if !self.pending_backticks.is_empty() {
+                    // We had partial backticks that didn't complete - flush them
+                    let pending = self.pending_backticks.clone();
+                    self.pending_backticks.clear();
+                    self.print_text(&pending);
+                }
+
+                if self.collecting_language {
+                    // After opening ```, collect language until newline
+                    if ch == '\n' {
+                        self.collecting_language = false;
+                        // Print the code block header with styling
+                        let lang_display = self.language.as_deref().unwrap_or("");
+                        print!("{}", format!("```{}\n", lang_display).cyan());
+                    } else if !ch.is_whitespace() {
+                        // Accumulate language identifier
+                        if self.language.is_none() {
+                            self.language = Some(String::new());
+                        }
+                        if let Some(ref mut lang) = self.language {
+                            lang.push(ch);
+                        }
+                    }
+                } else {
+                    self.print_char(ch);
+                }
+            }
+        }
+    }
+
+    fn toggle_code_block(&mut self) {
+        if self.in_code_block {
+            // Closing code block
+            print!("{}", "```".cyan());
+            self.in_code_block = false;
+            self.language = None;
+        } else {
+            // Opening code block - start collecting language
+            self.in_code_block = true;
+            self.collecting_language = true;
+            self.language = None;
+            // Don't print ``` yet - wait until we have the full header line
+        }
+    }
+
+    fn print_char(&self, ch: char) {
+        if self.in_code_block {
+            // Code content - use distinct styling (bright cyan)
+            print!("{}", format!("{}", ch).bright_cyan());
+        } else {
+            // Normal text
+            print!("{}", ch);
+        }
+    }
+
+    fn print_text(&self, text: &str) {
+        if self.in_code_block {
+            print!("{}", text.bright_cyan());
+        } else {
+            print!("{}", text);
+        }
+    }
+
+    /// Flush any pending state at end of stream
+    fn flush(&mut self) {
+        if !self.pending_backticks.is_empty() {
+            let pending = self.pending_backticks.clone();
+            self.pending_backticks.clear();
+            self.print_text(&pending);
+        }
+    }
 }
 
 /// RigRun - Local-first LLM router. Your GPU first, cloud when needed.
@@ -609,27 +782,94 @@ fn check_model_downloaded(model: &str) -> bool {
 }
 
 async fn download_model(model: &str) -> Result<()> {
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    // Check if already downloaded
+    if is_model_available(model) {
+        println!("  {GREEN}[✓]{RESET} Model {model} already downloaded");
+        return Ok(());
+    }
+
     println!("  {YELLOW}[↓]{RESET} Downloading {model}...");
+    println!("      {DIM}This is a one-time download. Future starts are instant.{RESET}");
 
-    // Use ollama pull to download the model
-    let status = tokio::process::Command::new("ollama")
-        .args(["pull", model])
-        .status()
-        .await;
+    let client = OllamaClient::new();
+    let model_name = model.to_string();
 
-    match status {
-        Ok(s) if s.success() => {
-            println!("  {GREEN}[✓]{RESET} Model ready");
+    // Create a progress bar with a nice style
+    let pb = ProgressBar::new(100);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("      {spinner:.green} [{bar:40.cyan/blue}] {pos:>3}% | {msg}")
+            .unwrap()
+            .progress_chars("█▓░")
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+
+    // Track state for progress updates
+    let pb_clone = pb.clone();
+    let mut last_percentage: u64 = 0;
+    let mut current_status = String::new();
+
+    // Run the download in a blocking task since OllamaClient uses blocking reqwest
+    let result = tokio::task::spawn_blocking(move || {
+        client.pull_model_with_progress(&model_name, |progress| {
+            // Update status message if changed
+            if progress.status != current_status {
+                current_status = progress.status.clone();
+                let status_msg = match current_status.as_str() {
+                    s if s.contains("pulling manifest") => "Fetching manifest...",
+                    s if s.contains("pulling") => "Downloading layers...",
+                    s if s.contains("verifying") => "Verifying...",
+                    s if s.contains("writing") => "Writing to disk...",
+                    s if s.contains("success") => "Complete!",
+                    _ => &current_status,
+                };
+                pb_clone.set_message(status_msg.to_string());
+            }
+
+            // Update progress bar position
+            if let Some(pct) = progress.percentage() {
+                let pct_int = pct as u64;
+                if pct_int != last_percentage {
+                    last_percentage = pct_int;
+                    pb_clone.set_position(pct_int);
+
+                    // Show size info if available
+                    if let (Some(completed), Some(total)) = (progress.completed, progress.total) {
+                        let completed_gb = completed as f64 / 1_073_741_824.0;
+                        let total_gb = total as f64 / 1_073_741_824.0;
+                        if total_gb >= 0.1 {
+                            pb_clone.set_message(format!("{:.1} GB / {:.1} GB", completed_gb, total_gb));
+                        }
+                    }
+                }
+            }
+        })
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
+
+    pb.finish_and_clear();
+
+    match result {
+        Ok(()) => {
+            println!("  {GREEN}[✓]{RESET} Model {model} ready");
             Ok(())
         }
-        Ok(_) => {
-            println!("  {RED}[✗]{RESET} Failed to download model");
-            anyhow::bail!("Failed to download model")
-        }
         Err(e) => {
-            println!("  {RED}[✗]{RESET} Ollama not found. Please install Ollama first.");
-            println!("      Visit: https://ollama.ai/download");
-            anyhow::bail!("Ollama not available: {}", e)
+            let err_str = e.to_string();
+            if err_str.contains("Cannot connect") || err_str.contains("not running") {
+                println!("  {RED}[✗]{RESET} Ollama not running. Start it with: ollama serve");
+                anyhow::bail!("Ollama not running")
+            } else if err_str.contains("not found") {
+                println!("  {RED}[✗]{RESET} Model not found: {model}");
+                anyhow::bail!("Model not found: {}", model)
+            } else {
+                println!("  {RED}[✗]{RESET} Failed to download model: {}", e);
+                anyhow::bail!("Failed to download model: {}", e)
+            }
         }
     }
 }
@@ -730,26 +970,44 @@ fn is_rigrun_process(pid: u32) -> bool {
 async fn start_server(config: &Config) -> Result<()> {
     let mut port = config.port.unwrap_or(DEFAULT_PORT);
 
-    // GPU detection with timeout to prevent startup hang
-    print!("{DIM}Detecting GPU...{RESET}");
-    std::io::Write::flush(&mut std::io::stdout()).ok();
+    // Start server immediately - GPU detection happens in background
+    println!("{BLUE}[i]{RESET} Starting server...");
 
-    let gpu = match tokio::time::timeout(
-        tokio::time::Duration::from_secs(5),
-        tokio::task::spawn_blocking(detect_gpu)
-    ).await {
-        Ok(Ok(Ok(gpu_info))) => {
-            println!("\r{GREEN}[✓]{RESET} GPU: {} ({} GB VRAM)       ", gpu_info.name, gpu_info.vram_gb);
-            gpu_info
-        }
-        Ok(Ok(Err(_))) | Ok(Err(_)) | Err(_) => {
-            println!("\r{YELLOW}[!]{RESET} GPU detection slow/failed, using defaults       ");
-            GpuInfo::default()
-        }
-    };
+    // Spawn GPU detection in background (non-blocking) with animated spinner
+    let gpu_spinner = spinner::create("Detecting GPU...");
+    let gpu_handle = tokio::spawn(async {
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            tokio::task::spawn_blocking(detect_gpu)
+        ).await
+    });
 
-    // Ensure Ollama is running (auto-start if needed)
+    // Use default GPU info initially (conservative - CPU mode)
+    let mut gpu = GpuInfo::default();
+
+    // Ensure Ollama is running with default settings first
+    // (will work for most cases; RDNA 4 users may need manual Vulkan setup)
     ensure_ollama_running(&gpu).await?;
+
+    // Wait briefly for GPU detection - if it's fast, we get the real info
+    // If slow, we continue with defaults and log when detection completes
+    tokio::select! {
+        result = gpu_handle => {
+            match result {
+                Ok(Ok(Ok(Ok(gpu_info)))) => {
+                    spinner::finish_success(&gpu_spinner, &format!("GPU: {} ({} GB VRAM)", gpu_info.name, gpu_info.vram_gb));
+                    gpu = gpu_info;
+                }
+                _ => {
+                    spinner::finish_warning(&gpu_spinner, "GPU: using defaults");
+                }
+            }
+        }
+        _ = tokio::time::sleep(tokio::time::Duration::from_millis(500)) => {
+            // Timeout - GPU detection still running, continue with defaults
+            spinner::finish_warning(&gpu_spinner, "GPU: detection in background, using defaults");
+        }
+    }
 
     let model = config
         .model
@@ -1066,9 +1324,18 @@ fn list_models() -> Result<()> {
     // Get list of downloaded models from Ollama
     let downloaded_models = list_ollama_models();
 
+    // Column widths for consistent alignment
+    const COL_MODEL: usize = 25;
+    const COL_SIZE: usize = 8;
+    const COL_DISK: usize = 10;
+    const COL_VRAM: usize = 10;
+
     println!(
-        "  {DIM}{:<25} {:<8} {:<10} {:<10} NOTES{RESET}",
-        "MODEL", "SIZE", "DISK", "VRAM"
+        "  {DIM}{} {} {} {} NOTES{RESET}",
+        pad_display("MODEL", COL_MODEL),
+        pad_display("SIZE", COL_SIZE),
+        pad_display("DISK", COL_DISK),
+        pad_display("VRAM", COL_VRAM)
     );
     println!("  {DIM}{}{RESET}", "-".repeat(75));
 
@@ -1079,9 +1346,17 @@ fn list_models() -> Result<()> {
         } else {
             "   ".to_string()
         };
+        // Use pad_display to correctly handle colored text alignment
+        let colored_name = format!("{WHITE}{}{RESET}", name);
+        let colored_notes = format!("{DIM}{}{RESET}", notes);
         println!(
-            "{} {WHITE}{:<25}{RESET} {:<8} {:<10} {:<10} {DIM}{}{RESET}",
-            status, name, size, disk, vram, notes
+            "{} {} {} {} {} {}",
+            pad_display(&status, 3),  // Status column (checkmark or spaces)
+            pad_display(&colored_name, COL_MODEL),
+            pad_display(size, COL_SIZE),
+            pad_display(disk, COL_DISK),
+            pad_display(vram, COL_VRAM),
+            colored_notes
         );
     }
 
@@ -1153,23 +1428,18 @@ async fn ensure_ollama_running(gpu: &GpuInfo) -> Result<()> {
     match cmd.spawn() {
         Ok(_) => {
             // Wait for Ollama to be ready (up to 10 seconds)
-            print!("{DIM}Waiting for Ollama to start...{RESET}");
-            std::io::Write::flush(&mut std::io::stdout()).ok();
+            let ollama_spinner = spinner::create("Waiting for Ollama to start...");
 
-            for i in 0..20 {
+            for _ in 0..20 {
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
                 if check_ollama_running_quick() {
-                    println!("\r{GREEN}[✓]{RESET} Ollama: Started successfully       ");
+                    spinner::finish_success(&ollama_spinner, "Ollama: Started successfully");
                     return Ok(());
-                }
-                if i % 4 == 0 {
-                    print!(".");
-                    std::io::Write::flush(&mut std::io::stdout()).ok();
                 }
             }
 
             // Timeout - Ollama didn't start in time
-            println!("\r{RED}[✗]{RESET} Ollama failed to start within 10 seconds       ");
+            spinner::finish_error(&ollama_spinner, "Ollama failed to start within 10 seconds");
             anyhow::bail!(
                 "Ollama failed to start. Please start manually:\n  \
                  Windows: {}\n  \
@@ -1182,7 +1452,7 @@ async fn ensure_ollama_running(gpu: &GpuInfo) -> Result<()> {
             );
         }
         Err(e) => {
-            println!("{RED}[✗]{RESET} Failed to start Ollama: {}", e);
+            println!("{RED}[X]{RESET} Failed to start Ollama: {}", e);
             anyhow::bail!(
                 "Failed to start Ollama. Is it installed?\n  \
                  Download from: https://ollama.ai/download"
@@ -1207,6 +1477,9 @@ async fn pull_model(model: String) -> Result<()> {
     println!("{CYAN}[↓]{RESET} Pulling {WHITE}{BOLD}{model}{RESET}...");
     println!();
 
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
     // Validate model name (allow any model that follows the pattern)
     let valid_prefixes = [
         "qwen2.5-coder",
@@ -1226,33 +1499,100 @@ async fn pull_model(model: String) -> Result<()> {
         println!();
     }
 
-    // Use ollama pull to download the model
-    println!("  Connecting to Ollama...");
+    let client = OllamaClient::new();
 
-    let mut child = tokio::process::Command::new("ollama")
-        .args(["pull", &model])
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()
-        .context("Failed to start ollama. Is Ollama installed?")?;
-
-    let status = child.wait().await?;
-
-    println!();
-
-    if status.success() {
-        println!(
-            "{GREEN}[✓]{RESET} Model {WHITE}{BOLD}{model}{RESET} downloaded successfully!"
-        );
-        println!();
-        println!("Start the server with: {CYAN}rigrun{RESET}");
-    } else {
-        println!("{RED}[✗]{RESET} Failed to download model: {model}");
+    // Check if Ollama is running first
+    if !client.check_ollama_running() {
+        println!("{RED}[✗]{RESET} Ollama is not running.");
         println!();
         println!("Make sure:");
         println!("  1. Ollama is installed (https://ollama.ai/download)");
-        println!("  2. Ollama service is running (ollama serve)");
-        println!("  3. Model name is correct");
+        println!("  2. Ollama service is running: {CYAN}ollama serve{RESET}");
+        println!();
+        anyhow::bail!("Ollama not running");
+    }
+
+    // Create a progress bar with indicatif
+    let pb = ProgressBar::new(100);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos:>3}% | {msg}")
+            .unwrap()
+            .progress_chars("█▓░")
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb.set_message("Starting download...");
+
+    // Track state for progress updates
+    let pb_clone = pb.clone();
+    let mut last_percentage: u64 = 0;
+    let mut current_status = String::new();
+    let model_clone = model.clone();
+
+    // Run the download in a blocking task since OllamaClient uses blocking reqwest
+    let result = tokio::task::spawn_blocking(move || {
+        client.pull_model_with_progress(&model_clone, |progress| {
+            // Update status message if changed
+            if progress.status != current_status {
+                current_status = progress.status.clone();
+                let status_msg = match current_status.as_str() {
+                    s if s.contains("pulling manifest") => "Fetching manifest...",
+                    s if s.contains("pulling") => "Downloading layers...",
+                    s if s.contains("verifying") => "Verifying...",
+                    s if s.contains("writing") => "Writing to disk...",
+                    s if s.contains("success") => "Complete!",
+                    _ => &current_status,
+                };
+                pb_clone.set_message(status_msg.to_string());
+            }
+
+            // Update progress bar position
+            if let Some(pct) = progress.percentage() {
+                let pct_int = pct as u64;
+                if pct_int != last_percentage {
+                    last_percentage = pct_int;
+                    pb_clone.set_position(pct_int);
+
+                    // Show size info if available
+                    if let (Some(completed), Some(total)) = (progress.completed, progress.total) {
+                        let completed_gb = completed as f64 / 1_073_741_824.0;
+                        let total_gb = total as f64 / 1_073_741_824.0;
+                        if total_gb >= 0.1 {
+                            pb_clone.set_message(format!("{:.1} GB / {:.1} GB", completed_gb, total_gb));
+                        }
+                    }
+                }
+            }
+        })
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("Task join error: {}", e))?;
+
+    pb.finish_and_clear();
+
+    println!();
+
+    match result {
+        Ok(()) => {
+            println!(
+                "{GREEN}[✓]{RESET} Model {WHITE}{BOLD}{model}{RESET} downloaded successfully!"
+            );
+            println!();
+            println!("Start the server with: {CYAN}rigrun{RESET}");
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("not found") {
+                println!("{RED}[✗]{RESET} Model not found: {model}");
+            } else {
+                println!("{RED}[✗]{RESET} Failed to download model: {model}");
+                println!("    Error: {}", e);
+            }
+            println!();
+            println!("Make sure:");
+            println!("  1. Ollama service is running: {CYAN}ollama serve{RESET}");
+            println!("  2. Model name is correct");
+        }
     }
 
     println!();
@@ -1270,6 +1610,9 @@ fn get_model_from_config() -> String {
 }
 
 fn ensure_model_available(client: &OllamaClient, model: &str) -> Result<()> {
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
     if !client.check_ollama_running() {
         anyhow::bail!(
             "Ollama is not running. Please start it with: {}", "ollama serve".bright_cyan()
@@ -1283,14 +1626,55 @@ fn ensure_model_available(client: &OllamaClient, model: &str) -> Result<()> {
             model.bright_white().bold()
         );
 
+        // Create a progress bar with indicatif
+        let pb = ProgressBar::new(100);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos:>3}% | {msg}")
+                .unwrap()
+                .progress_chars("█▓░")
+        );
+        pb.enable_steady_tick(Duration::from_millis(100));
+
+        let mut last_percentage: u64 = 0;
+        let mut current_status = String::new();
+
         client.pull_model_with_progress(model, |progress| {
+            // Update status message if changed
+            if progress.status != current_status {
+                current_status = progress.status.clone();
+                let status_msg = match current_status.as_str() {
+                    s if s.contains("pulling manifest") => "Fetching manifest...",
+                    s if s.contains("pulling") => "Downloading layers...",
+                    s if s.contains("verifying") => "Verifying...",
+                    s if s.contains("writing") => "Writing to disk...",
+                    s if s.contains("success") => "Complete!",
+                    _ => &current_status,
+                };
+                pb.set_message(status_msg.to_string());
+            }
+
+            // Update progress bar position
             if let Some(pct) = progress.percentage() {
-                print!("\r{} {}: {:.1}%", "[↓]".bright_yellow(), progress.status, pct);
-                io::stdout().flush().ok();
+                let pct_int = pct as u64;
+                if pct_int != last_percentage {
+                    last_percentage = pct_int;
+                    pb.set_position(pct_int);
+
+                    // Show size info if available
+                    if let (Some(completed), Some(total)) = (progress.completed, progress.total) {
+                        let completed_gb = completed as f64 / 1_073_741_824.0;
+                        let total_gb = total as f64 / 1_073_741_824.0;
+                        if total_gb >= 0.1 {
+                            pb.set_message(format!("{:.1} GB / {:.1} GB", completed_gb, total_gb));
+                        }
+                    }
+                }
             }
         })?;
 
-        println!("\n{} Model ready", "[✓]".bright_green());
+        pb.finish_and_clear();
+        println!("{} Model ready", "[✓]".bright_green());
     }
 
     Ok(())
@@ -1308,9 +1692,8 @@ fn direct_prompt(prompt: &str, model: Option<String>) -> Result<()> {
     let mut first_token_received = false;
     let mut time_to_first_token = 0u128;
 
-    // Show thinking indicator
-    print!("{}", "Thinking...".bright_black());
-    io::stdout().flush().ok();
+    // Show thinking indicator with animated spinner
+    let thinking_spinner = RefCell::new(Some(spinner::create("Thinking...")));
 
     // Set up Ctrl+C handling for cancellation
     let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -1319,19 +1702,27 @@ fn direct_prompt(prompt: &str, model: Option<String>) -> Result<()> {
         cancel_flag_clone.store(true, Ordering::Relaxed);
     });
 
+    // Use CodeBlockTracker for syntax highlighting of code blocks
+    let code_block_tracker = RefCell::new(CodeBlockTracker::new());
+
     let response = client.chat_stream_cancellable(&model, messages, |chunk| {
         if !first_token_received {
             first_token_received = true;
             time_to_first_token = start.elapsed().as_millis();
-            // Clear thinking indicator and show first token
-            print!("\r{}\r", " ".repeat(12));
-            io::stdout().flush().ok();
+            // Clear thinking spinner before showing first token
+            if let Some(s) = thinking_spinner.borrow_mut().take() {
+                spinner::clear(&s);
+            }
         }
         if !chunk.done {
-            print!("{}", chunk.token);
+            // Use the code block tracker for syntax-highlighted output
+            code_block_tracker.borrow_mut().process_token(&chunk.token);
             io::stdout().flush().ok();
         }
     }, Some(cancel_flag.clone()));
+
+    // Flush any pending code block state
+    code_block_tracker.borrow_mut().flush();
 
     // Handle cancellation or completion
     let (response, was_cancelled) = match response {
@@ -1804,9 +2195,8 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         let mut time_to_first_token = 0u128;
         let mut accumulated_response = String::new();
 
-        // Show thinking indicator
-        print!("{}", "Thinking...".bright_black());
-        io::stdout().flush().ok();
+        // Show thinking indicator with animated spinner
+        let thinking_spinner = RefCell::new(Some(spinner::create("Thinking...")));
 
         // Set up Ctrl+C handling for cancellation
         let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -1816,18 +2206,26 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         });
 
         // Get response with TRUE streaming and cancellation support
+        // Use CodeBlockTracker for syntax highlighting of code blocks
+        let code_block_tracker = RefCell::new(CodeBlockTracker::new());
+
         let response_result = client.chat_stream_cancellable(&model, conversation.clone(), |chunk| {
             if !first_token_received {
                 first_token_received = true;
                 time_to_first_token = start.elapsed().as_millis();
-                // Clear thinking indicator
-                print!("\r{}\r", " ".repeat(12));
-                io::stdout().flush().ok();
+                // Clear thinking spinner before showing first token
+                if let Some(s) = thinking_spinner.borrow_mut().take() {
+                    spinner::clear(&s);
+                }
             }
             accumulated_response.push_str(&chunk.token);
-            print!("{}", chunk.token);
+            // Use the code block tracker for syntax-highlighted output
+            code_block_tracker.borrow_mut().process_token(&chunk.token);
             io::stdout().flush().ok();
         }, Some(cancel_flag.clone()));
+
+        // Flush any pending code block state
+        code_block_tracker.borrow_mut().flush();
 
         // Handle cancellation or completion
         let (response, was_cancelled) = match response_result {

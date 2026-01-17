@@ -450,9 +450,11 @@ fn open_browser(url: &str) -> Result<()> {
     Ok(())
 }
 
-/// Download model with progress bar
+/// Download model with progress bar using indicatif
 pub fn download_model_with_progress(model: &str) -> Result<()> {
     use crate::detect::is_model_available;
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
 
     // Check if already downloaded
     if is_model_available(model) {
@@ -467,44 +469,76 @@ pub fn download_model_with_progress(model: &str) -> Result<()> {
 
     let client = OllamaClient::new();
 
-    // Track download progress
-    let mut last_percentage: f64 = 0.0;
+    // Create a progress bar with indicatif
+    let pb = ProgressBar::new(100);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos:>3}% | {msg}")
+            .unwrap()
+            .progress_chars("█▓░")
+    );
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb.set_message("Starting download...");
+
+    // Track state for progress updates
+    let mut last_percentage: u64 = 0;
     let mut current_status = String::new();
 
-    client.pull_model_with_progress(model, |progress| {
-        // Update status if changed
+    let result = client.pull_model_with_progress(model, |progress| {
+        // Update status message if changed
         if progress.status != current_status {
             current_status = progress.status.clone();
-            if !current_status.contains("pulling") && !current_status.contains("download") {
-                print!("\r{CYAN}[...]{RESET} {}                    ", current_status);
-                io::stdout().flush().ok();
-            }
+            let status_msg = match current_status.as_str() {
+                s if s.contains("pulling manifest") => "Fetching manifest...",
+                s if s.contains("pulling") => "Downloading layers...",
+                s if s.contains("verifying") => "Verifying...",
+                s if s.contains("writing") => "Writing to disk...",
+                s if s.contains("success") => "Complete!",
+                _ => &current_status,
+            };
+            pb.set_message(status_msg.to_string());
         }
 
-        // Show progress bar for downloads
+        // Update progress bar position
         if let Some(pct) = progress.percentage() {
-            if (pct - last_percentage).abs() >= 1.0 || pct >= 99.9 {
-                last_percentage = pct;
-                let bar_width: usize = 40;
-                let filled = ((pct / 100.0) * bar_width as f64) as usize;
-                let empty = bar_width.saturating_sub(filled);
+            let pct_int = pct as u64;
+            if pct_int != last_percentage {
+                last_percentage = pct_int;
+                pb.set_position(pct_int);
 
-                let bar: String = format!(
-                    "{}{}",
-                    "#".repeat(filled),
-                    "-".repeat(empty)
-                );
-
-                print!("\r{CYAN}[+]{RESET} Downloading {model}... [{bar}] {:.1}%  ", pct);
-                io::stdout().flush().ok();
+                // Show size info if available
+                if let (Some(completed), Some(total)) = (progress.completed, progress.total) {
+                    let completed_gb = completed as f64 / 1_073_741_824.0;
+                    let total_gb = total as f64 / 1_073_741_824.0;
+                    if total_gb >= 0.1 {
+                        pb.set_message(format!("{:.1} GB / {:.1} GB", completed_gb, total_gb));
+                    }
+                }
             }
         }
-    })?;
+    });
 
-    println!();
-    println!("{GREEN}[+]{RESET} Model {WHITE}{BOLD}{model}{RESET} downloaded successfully!");
+    pb.finish_and_clear();
 
-    Ok(())
+    match result {
+        Ok(()) => {
+            println!("{GREEN}[+]{RESET} Model {WHITE}{BOLD}{model}{RESET} downloaded successfully!");
+            Ok(())
+        }
+        Err(e) => {
+            let err_str = e.to_string();
+            if err_str.contains("Cannot connect") || err_str.contains("not running") {
+                println!("{RED}[X]{RESET} Ollama not running. Start it with: {CYAN}ollama serve{RESET}");
+                Err(e)
+            } else if err_str.contains("not found") {
+                println!("{RED}[X]{RESET} Model not found: {WHITE}{model}{RESET}");
+                Err(e)
+            } else {
+                println!("{RED}[X]{RESET} Download failed: {}", e);
+                Err(e)
+            }
+        }
+    }
 }
 
 /// Run health check to verify setup

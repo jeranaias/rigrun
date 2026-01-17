@@ -921,24 +921,58 @@ impl SetupWizard {
 
         let client = OllamaClient::new();
         let start = Instant::now();
-        let mut last_print = Instant::now();
+
+        // Create a progress bar with indicatif
+        use indicatif::{ProgressBar, ProgressStyle};
+        let pb = ProgressBar::new(100);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("  {spinner:.green} [{bar:40.cyan/blue}] {pos:>3}% | {msg}")
+                .unwrap()
+                .progress_chars("█▓░")
+        );
+        pb.enable_steady_tick(Duration::from_millis(100));
+
+        let mut last_percentage: u64 = 0;
+        let mut current_status = String::new();
 
         client.pull_model_with_progress(model, |progress: PullProgress| {
-            // Only print every 500ms to avoid flooding
-            if last_print.elapsed() > Duration::from_millis(500) {
-                if let Some(pct) = progress.percentage() {
-                    print!("\r  {CYAN}[{:.0}%]{RESET} {}", pct, progress.status);
-                    io::stdout().flush().ok();
-                } else {
-                    print!("\r  {CYAN}[...]{RESET} {}", progress.status);
-                    io::stdout().flush().ok();
+            // Update status message if changed
+            if progress.status != current_status {
+                current_status = progress.status.clone();
+                let status_msg = match current_status.as_str() {
+                    s if s.contains("pulling manifest") => "Fetching manifest...",
+                    s if s.contains("pulling") => "Downloading layers...",
+                    s if s.contains("verifying") => "Verifying...",
+                    s if s.contains("writing") => "Writing to disk...",
+                    s if s.contains("success") => "Complete!",
+                    _ => &current_status,
+                };
+                pb.set_message(status_msg.to_string());
+            }
+
+            // Update progress bar position
+            if let Some(pct) = progress.percentage() {
+                let pct_int = pct as u64;
+                if pct_int != last_percentage {
+                    last_percentage = pct_int;
+                    pb.set_position(pct_int);
+
+                    // Show size info if available
+                    if let (Some(completed), Some(total)) = (progress.completed, progress.total) {
+                        let completed_gb = completed as f64 / 1_073_741_824.0;
+                        let total_gb = total as f64 / 1_073_741_824.0;
+                        if total_gb >= 0.1 {
+                            pb.set_message(format!("{:.1} GB / {:.1} GB", completed_gb, total_gb));
+                        }
+                    }
                 }
-                last_print = Instant::now();
             }
         })?;
 
+        pb.finish_and_clear();
         let elapsed = start.elapsed();
-        println!("\r  {GREEN}[OK]{RESET} Model downloaded in {:.0}s                    ", elapsed.as_secs_f64());
+        println!("  {GREEN}[OK]{RESET} Model downloaded in {:.0}s", elapsed.as_secs_f64());
 
         Ok(model.to_string())
     }
