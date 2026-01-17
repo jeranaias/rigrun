@@ -53,6 +53,31 @@ mod colors {
 
 use colors::*;
 
+/// Exit codes following sysexits.h conventions
+/// These provide meaningful exit status to calling processes and scripts
+mod exit_codes {
+    /// Success - operation completed successfully
+    pub const SUCCESS: i32 = 0;
+    /// General error - unspecified error
+    pub const ERROR: i32 = 1;
+    /// Usage error - invalid command line arguments
+    pub const USAGE: i32 = 64;
+    /// Data error - invalid input data format
+    pub const DATA_ERR: i32 = 65;
+    /// Service unavailable - required service (Ollama) not running
+    pub const SERVICE_UNAVAILABLE: i32 = 69;
+    /// Internal software error - unexpected condition
+    pub const SOFTWARE: i32 = 70;
+    /// I/O error - network or file operation failed
+    pub const IO_ERR: i32 = 74;
+    /// Temporary failure - try again later
+    pub const TEMP_FAIL: i32 = 75;
+    /// Configuration error - invalid or missing config
+    pub const CONFIG: i32 = 78;
+}
+
+use exit_codes::*;
+
 /// Clear the terminal screen
 fn clear_screen() {
     print!("\x1B[2J\x1B[1;1H");
@@ -95,6 +120,14 @@ struct Cli {
     /// Run quick setup wizard (minimal prompts, recommended defaults)
     #[arg(long, global = true)]
     quick_setup: bool,
+
+    /// Quiet mode: minimal output, only essential information
+    #[arg(short = 'q', long, global = true)]
+    quiet: bool,
+
+    /// Verbose mode: detailed output for debugging
+    #[arg(short = 'v', long, global = true)]
+    verbose: bool,
 }
 
 #[derive(Subcommand)]
@@ -1622,6 +1655,27 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 }
             }
 
+            // Special case: /mode command to change routing mode
+            if input.starts_with("/mode ") {
+                let new_mode = input.strip_prefix("/mode ").unwrap().trim().to_lowercase();
+                match OperatingMode::from_str(&new_mode) {
+                    Some(mode) => {
+                        status_indicator.set_mode(mode);
+                        let mode_desc = match mode {
+                            OperatingMode::Local => "Local only - all queries processed locally via Ollama",
+                            OperatingMode::Cloud => "Cloud only - all queries routed to cloud providers",
+                            OperatingMode::Auto => "Auto - local first, cloud fallback if needed",
+                            OperatingMode::Hybrid => "Hybrid - intelligent routing based on query complexity",
+                        };
+                        println!("{} Mode: {} - {}", "[+]".green(), new_mode.bright_white(), mode_desc.bright_black());
+                    }
+                    None => {
+                        println!("{} Invalid mode '{}'. Available: local, cloud, auto, hybrid", "[!]".yellow(), new_mode);
+                    }
+                }
+                continue;
+            }
+
             // Update status indicator stats before handling command
             status_indicator.update_stats(conversation.len() as u32, 0);
 
@@ -1734,8 +1788,15 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         print!("{}", "Thinking...".bright_black());
         io::stdout().flush().ok();
 
-        // Get response with TRUE streaming (typewriter effect)
-        let response_result = client.chat_stream(&model, conversation.clone(), |chunk| {
+        // Set up Ctrl+C handling for cancellation
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+        let _ = ctrlc::set_handler(move || {
+            cancel_flag_clone.store(true, Ordering::Relaxed);
+        });
+
+        // Get response with TRUE streaming and cancellation support
+        let response_result = client.chat_stream_cancellable(&model, conversation.clone(), |chunk| {
             if !first_token_received {
                 first_token_received = true;
                 time_to_first_token = start.elapsed().as_millis();
@@ -1743,22 +1804,33 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
                 print!("\r{}\r", " ".repeat(12));
                 io::stdout().flush().ok();
             }
-            accumulated_response.push_str(chunk);
-            print!("{}", chunk);
+            accumulated_response.push_str(&chunk.token);
+            print!("{}", chunk.token);
             io::stdout().flush().ok();
-        });
+        }, Some(cancel_flag.clone()));
 
-        // Handle response or store error for @error mention
-        let response = match response_result {
-            Ok(r) => r,
+        // Handle cancellation or completion
+        let (response, was_cancelled) = match response_result {
+            Ok(r) => (r, false),
             Err(e) => {
-                // Store error for @error mention
-                rigrun::store_last_error(&format!("{}", e));
-                println!("\r{}\r", " ".repeat(12)); // Clear thinking indicator
-                eprintln!("{} {}", "[Error]".red(), e);
-                // Remove the failed user message from conversation
-                conversation.pop();
-                continue;
+                if e.to_string().contains("cancelled") {
+                    println!("\n{}", "[Interrupted]".yellow());
+                    // Create partial response with accumulated text
+                    (rigrun::local::OllamaResponse {
+                        response: accumulated_response.clone(),
+                        prompt_tokens: 0,
+                        completion_tokens: 0,
+                        total_duration_ms: 0,
+                    }, true)
+                } else {
+                    // Store error for @error mention
+                    rigrun::store_last_error(&format!("{}", e));
+                    println!("\r{}\r", " ".repeat(12)); // Clear thinking indicator
+                    eprintln!("{} {}", "[Error]".red(), e);
+                    // Remove the failed user message from conversation
+                    conversation.pop();
+                    continue;
+                }
             }
         };
 
@@ -1767,24 +1839,36 @@ pub fn interactive_chat(model: Option<String>) -> Result<()> {
         // Refresh session after receiving response (user is active)
         session.refresh();
 
-        // Add assistant response to conversation
-        conversation.push(Message::assistant(response.response.clone()));
-
-        // Show stats with TTFT
-        let elapsed = start.elapsed();
-        let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 && response.completion_tokens > 0 {
-            response.completion_tokens as f64 / elapsed.as_secs_f64()
+        // Add assistant response to conversation (even partial if interrupted)
+        if !response.response.is_empty() {
+            conversation.push(Message::assistant(response.response.clone()));
+        } else if !accumulated_response.is_empty() {
+            // Use accumulated response for interrupted stream
+            conversation.push(Message::assistant(accumulated_response.clone()));
         } else {
-            0.0
-        };
+            // Empty response, remove the user message
+            conversation.pop();
+        }
 
-        println!(
-            "{} {:.1}s | {} tok/s | TTFT: {}ms\n",
-            "───".bright_black(),
-            elapsed.as_secs_f64(),
-            format!("{:.1}", tokens_per_sec).bright_black(),
-            time_to_first_token.to_string().bright_green()
-        );
+        // Show stats with TTFT (only if not cancelled)
+        if !was_cancelled {
+            let elapsed = start.elapsed();
+            let tokens_per_sec = if elapsed.as_secs_f64() > 0.0 && response.completion_tokens > 0 {
+                response.completion_tokens as f64 / elapsed.as_secs_f64()
+            } else {
+                0.0
+            };
+
+            println!(
+                "{} {:.1}s | {} tok/s | TTFT: {}ms\n",
+                "───".bright_black(),
+                elapsed.as_secs_f64(),
+                format!("{:.1}", tokens_per_sec).bright_black(),
+                time_to_first_token.to_string().bright_green()
+            );
+        } else {
+            println!(); // Just add a newline after interrupted stream
+        }
     }
 
     Ok(())
@@ -3094,12 +3178,12 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
             match rigrun::run_setup(quick, full, hardware) {
                 Ok(result) => {
                     if !result.success {
-                        std::process::exit(1);
+                        std::process::exit(CONFIG);
                     }
                 }
                 Err(e) => {
                     eprintln!("{RED}[!]{RESET} Setup failed: {}", e);
-                    std::process::exit(1);
+                    std::process::exit(CONFIG);
                 }
             }
         }
@@ -3110,12 +3194,12 @@ async fn run_async_command(command: AsyncCommand, config: &mut Config, paranoid_
             if quick {
                 if let Err(e) = run_quick_wizard().await {
                     eprintln!("{RED}[!]{RESET} Quick wizard failed: {}", e);
-                    std::process::exit(1);
+                    std::process::exit(CONFIG);
                 }
             } else {
                 if let Err(e) = run_wizard().await {
                     eprintln!("{RED}[!]{RESET} Wizard failed: {}", e);
-                    std::process::exit(1);
+                    std::process::exit(CONFIG);
                 }
             }
         }
@@ -3157,7 +3241,7 @@ fn main() -> Result<()> {
     if let Err(e) = consent_banner::handle_consent_banner(cli.skip_banner, config.dod_banner_enabled) {
         eprintln!("{RED}[!]{RESET} Failed to handle DoD consent banner: {}", e);
         eprintln!("{RED}[!]{RESET} Cannot proceed without consent acknowledgment.");
-        std::process::exit(1);
+        std::process::exit(ERROR);
     }
 
     // Check if we have a prompt argument (either direct prompt or stdin)

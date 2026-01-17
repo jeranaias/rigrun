@@ -536,6 +536,29 @@ pub fn handle_slash_command(
             Ok(CommandResult::Handled)
         }
 
+        "mode" => {
+            // Show current mode and available modes
+            let current_mode = if let Some(indicator) = status_indicator {
+                format!("{}", indicator.mode())
+            } else {
+                "local".to_string()
+            };
+
+            println!();
+            println!("  Current mode: {}", current_mode.bright_white().bold());
+            println!();
+            println!("  Available modes:");
+            println!("    {} - All queries processed locally via Ollama", "local".green());
+            println!("    {} - All queries routed to cloud providers", "cloud".yellow());
+            println!("    {}  - Local first, cloud fallback if needed", "auto".cyan());
+            println!("    {} - Intelligent routing based on query complexity", "hybrid".bright_blue());
+            println!();
+            println!("  To change mode, use: /mode <mode_name>");
+            println!("  Example: /mode auto");
+            println!();
+            Ok(CommandResult::Handled)
+        }
+
         _ => {
             println!("\n  Unknown command: /{}", command);
             println!("  Type /help for available commands.\n");
@@ -557,6 +580,7 @@ fn print_help() {
     println!("    /autosave, /auto   Toggle auto-save on exit");
     println!("    /status, /stat     Show current status (model, GPU, session)");
     println!("    /model, /m         Show/change current model");
+    println!("    /mode              Show/change routing mode (local/cloud/auto/hybrid)");
     println!("    /help, /h, /?      Show this help message");
     println!("    /exit, /quit, /q   Exit the chat");
     println!();
@@ -565,6 +589,7 @@ fn print_help() {
     println!("    - Use /resume to continue where you left off");
     println!("    - Enable /autosave to never lose your work");
     println!("    - Use /status to check GPU and session info");
+    println!("    - Press Ctrl+C during response to interrupt");
     println!();
 }
 

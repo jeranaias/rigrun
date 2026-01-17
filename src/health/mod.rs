@@ -1103,7 +1103,7 @@ pub fn print_startup_warnings(warnings: &[HealthIssue]) {
 /// Prints critical errors and exits.
 ///
 /// This function displays critical errors that prevent rigrun from starting
-/// and then exits with code 1.
+/// and then exits with code 69 (SERVICE_UNAVAILABLE per sysexits.h).
 pub fn print_critical_and_exit(errors: &[HealthIssue]) -> ! {
     eprintln!();
     eprintln!("Critical errors - cannot start rigrun:");
@@ -1115,7 +1115,8 @@ pub fn print_critical_and_exit(errors: &[HealthIssue]) -> ! {
     }
     eprintln!("Run 'rigrun doctor' for detailed diagnostics.");
     eprintln!();
-    std::process::exit(1);
+    // Exit code 69 = SERVICE_UNAVAILABLE (sysexits.h convention)
+    std::process::exit(69);
 }
 
 #[cfg(test)]
