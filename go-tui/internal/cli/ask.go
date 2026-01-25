@@ -43,6 +43,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -446,8 +447,9 @@ func HandleAskCommand(args Args) error {
 			fmt.Fprintln(os.Stderr) // Blank line
 		}
 
-		// Use specialized agentic prompt that teaches tool usage
-		agenticPrompt := tools.GenerateAgenticLoopPrompt()
+		// Use specialized agentic prompt with platform awareness
+		cwd, _ := os.Getwd()
+		agenticPrompt := tools.GenerateAgenticLoopPromptWithContext(runtime.GOOS, cwd)
 		agenticMessages := []ollama.Message{
 			ollama.NewSystemMessage(agenticPrompt),
 			ollama.NewUserMessage(question),
@@ -1004,8 +1006,9 @@ func runCloudAgenticLoop(ctx context.Context, cfg *config.Config, model string, 
 		fmt.Println()
 	}
 
-	// Build agentic system prompt
-	agenticPrompt := tools.GenerateAgenticLoopPrompt()
+	// Build agentic system prompt with platform awareness
+	cwd, _ := os.Getwd()
+	agenticPrompt := tools.GenerateAgenticLoopPromptWithContext(runtime.GOOS, cwd)
 
 	// Build messages for cloud API
 	messages := []cloud.ChatMessage{

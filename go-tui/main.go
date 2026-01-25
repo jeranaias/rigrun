@@ -61,6 +61,19 @@ func main() {
 	// Route to appropriate handler
 	switch cmd {
 	case cli.CmdTUI:
+		// Check if this might be a typo before falling through to TUI
+		// When an unknown command is encountered, it's stored in args.Raw[0]
+		if len(args.Raw) > 0 && len(os.Args) > 1 {
+			// Only suggest if the first arg looks like a command (not a flag or question)
+			firstArg := args.Raw[0]
+			if len(firstArg) > 0 && firstArg[0] != '-' && !strings.Contains(firstArg, " ") {
+				if suggestion := cli.SuggestCommand(firstArg); suggestion != "" {
+					fmt.Fprintf(os.Stderr, "Unknown command '%s'. Did you mean '%s'?\n", firstArg, suggestion)
+					fmt.Fprintf(os.Stderr, "Run 'rigrun help' for available commands.\n")
+					os.Exit(1)
+				}
+			}
+		}
 		runTUI(args)
 	case cli.CmdAsk:
 		cli.HandleAsk(args)
@@ -193,7 +206,7 @@ func main() {
 	case cli.CmdHelp:
 		cli.HandleHelp()
 	default:
-		runTUI(args) // Default to TUI
+		runTUI(args)
 	}
 }
 

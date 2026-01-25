@@ -904,16 +904,64 @@ func GenerateStructuredTaskPrompt(task string, outputFormat string, constraints 
 
 // GenerateAgenticLoopPrompt creates a system prompt optimized for agentic tool loops.
 // This prompt teaches small models HOW to use tools and interpret results.
+// For platform-aware prompts, use GenerateAgenticLoopPromptWithContext instead.
 func GenerateAgenticLoopPrompt() string {
-	return `# AGENTIC ASSISTANT
+	return GenerateAgenticLoopPromptWithContext("", "")
+}
+
+// GenerateAgenticLoopPromptWithContext creates a platform-aware system prompt for agentic loops.
+// Parameters:
+//   - platform: "windows", "linux", "darwin" (use runtime.GOOS)
+//   - workingDir: current working directory (use os.Getwd())
+func GenerateAgenticLoopPromptWithContext(platform, workingDir string) string {
+	// Determine path format based on platform
+	pathExample := "/home/user/file.txt"
+	tempDir := "/tmp"
+	listCmd := "ls"
+	cwdExample := "/home/user/project"
+
+	if platform == "windows" {
+		pathExample = `C:\Users\user\file.txt`
+		tempDir = `%TEMP%` // Or actual temp like C:\Users\user\AppData\Local\Temp
+		listCmd = "dir"
+		cwdExample = `C:\Users\user\project`
+	}
+
+	if workingDir != "" {
+		cwdExample = workingDir
+	}
+
+	platformNote := ""
+	if platform == "windows" {
+		platformNote = `
+## WINDOWS PLATFORM
+- Use BACKSLASHES in paths: C:\folder\file.txt
+- Temp directory: ` + tempDir + `
+- Current directory: ` + cwdExample + `
+- Use "dir" instead of "ls" for listing files
+- Paths are case-INSENSITIVE
+`
+	} else if platform != "" {
+		platformNote = `
+## UNIX PLATFORM
+- Use forward slashes in paths: /folder/file.txt
+- Temp directory: ` + tempDir + `
+- Current directory: ` + cwdExample + `
+- Use "ls" for listing files
+- Paths are case-SENSITIVE
+`
+	}
+
+	return fmt.Sprintf(`# AGENTIC ASSISTANT
 
 You complete tasks using tools. STAY FOCUSED on the user's question.
-
+%s
 ## TOOLS
-- Glob: Find files. {"name":"Glob","arguments":{"pattern":"*.md","path":"/dir"}}
-- Grep: Search text. {"name":"Grep","arguments":{"pattern":"word","path":"/dir"}}
-- Read: Read file. {"name":"Read","arguments":{"file_path":"/path"}}
-- Bash: Run command. {"name":"Bash","arguments":{"command":"ls"}}
+- Glob: Find files. {"name":"Glob","arguments":{"pattern":"*.md","path":"%s"}}
+- Grep: Search text. {"name":"Grep","arguments":{"pattern":"word","path":"%s"}}
+- Read: Read file. {"name":"Read","arguments":{"file_path":"%s"}}
+- Bash: Run command. {"name":"Bash","arguments":{"command":"%s"}}
+- Write: Write file. {"name":"Write","arguments":{"file_path":"%s","content":"text"}}
 
 ## WORKFLOW
 1. UNDERSTAND the user's question
@@ -927,13 +975,14 @@ You complete tasks using tools. STAY FOCUSED on the user's question.
 - When you have the answer -> STOP calling tools and WRITE IT
 - Count items? -> Count the lines in tool output
 - Looking for files? -> Glob first, then Read if needed
+- For file operations, use the CURRENT DIRECTORY: %s
 - Your FINAL response must be plain text, NOT a tool call
 
 ## ANSWER FORMAT
 When ready to answer, write in plain text:
 "Based on my search, I found [X]. The answer is [Y]."
 
-DO NOT output JSON in your final answer.`
+DO NOT output JSON in your final answer.`, platformNote, cwdExample, cwdExample, pathExample, listCmd, pathExample, cwdExample)
 }
 
 // GenerateREADMEPrompt creates an optimized prompt for README generation.
