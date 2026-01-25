@@ -342,7 +342,7 @@ func (t *Theme) initStyles() {
 
 	// Command palette
 	t.PaletteOverlay = lipgloss.NewStyle().
-		Background(lipgloss.Color("#000000"))
+		Background(Overlay)
 
 	t.PaletteBox = lipgloss.NewStyle().
 		Background(Surface).
@@ -405,7 +405,7 @@ func (t *Theme) initStyles() {
 
 	// Code blocks
 	t.CodeBlock = lipgloss.NewStyle().
-		Background(lipgloss.Color("#1E1E2E")).
+		Background(SurfaceDim).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(Overlay).
 		Padding(1, 2)
@@ -429,8 +429,9 @@ func (t *Theme) initStyles() {
 
 	// Error boxes
 	t.ErrorBox = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
+		BorderStyle(lipgloss.DoubleBorder()).
 		BorderForeground(Rose).
+		Background(RoseDeep).
 		Padding(1, 2)
 
 	t.ErrorTitle = lipgloss.NewStyle().

@@ -8,6 +8,7 @@ package chat
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -58,6 +59,8 @@ type VimHandler struct {
 	visualEnd     int    // End position for visual selection
 	count         int    // Numeric prefix (e.g., 5j for 5 lines down)
 	lastG         bool   // Track if g was just pressed (for gg)
+	lastGTime     time.Time // Timestamp when lastG was set (for gg timeout)
+	lastCountTime time.Time // Timestamp when count was last updated (for count timeout)
 }
 
 // NewVimHandler creates a vim handler
@@ -124,9 +127,21 @@ func (vh *VimHandler) HandleKey(key tea.KeyMsg, vp *viewport.Model, input *texti
 // =============================================================================
 
 func (vh *VimHandler) handleNormalMode(keyStr string, vp *viewport.Model, input *textinput.Model) (bool, tea.Cmd) {
+	// Check count timeout - reset if no key pressed within 2 seconds
+	if vh.count > 0 && !vh.lastCountTime.IsZero() && time.Since(vh.lastCountTime) > 2*time.Second {
+		vh.count = 0
+		vh.lastCountTime = time.Time{}
+	}
+
 	// Handle numeric prefix for count (e.g., 5j)
-	if keyStr >= "1" && keyStr <= "9" {
+	// Support 0 after initial digit (e.g., "10j")
+	if (keyStr >= "1" && keyStr <= "9") || (keyStr == "0" && vh.count > 0) {
 		vh.count = vh.count*10 + int(keyStr[0]-'0')
+		// Bounds check: cap at 9999
+		if vh.count > 9999 {
+			vh.count = 9999
+		}
+		vh.lastCountTime = time.Now()
 		return true, nil
 	}
 
@@ -170,14 +185,22 @@ func (vh *VimHandler) handleNormalMode(keyStr string, vp *viewport.Model, input 
 
 	// Go to
 	case "g":
+		// Check if lastG timed out (500ms)
+		if vh.lastG && !vh.lastGTime.IsZero() && time.Since(vh.lastGTime) > 500*time.Millisecond {
+			vh.lastG = false
+			vh.lastGTime = time.Time{}
+		}
+
 		if vh.lastG {
 			// gg - go to top
 			vp.GotoTop()
 			vh.lastG = false
+			vh.lastGTime = time.Time{}
 			consumed = true
 		} else {
 			// First g, wait for second g
 			vh.lastG = true
+			vh.lastGTime = time.Now()
 			consumed = true
 		}
 	case "G":
@@ -240,7 +263,9 @@ func (vh *VimHandler) handleNormalMode(keyStr string, vp *viewport.Model, input 
 	// Reset count after command
 	if consumed && keyStr != "g" {
 		vh.count = 0
+		vh.lastCountTime = time.Time{}
 		vh.lastG = false
+		vh.lastGTime = time.Time{}
 	}
 
 	return consumed, cmd

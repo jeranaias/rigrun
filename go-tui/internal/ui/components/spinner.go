@@ -50,7 +50,7 @@ func NewSpinner() Spinner {
 	s := spinner.New()
 	s.Spinner = spinner.Spinner{
 		Frames: []string{"|", "/", "-", "\\"},
-		FPS:    time.Second / 10,
+		FPS:    time.Second / 30, // 30fps to match streaming
 	}
 
 	return Spinner{
@@ -97,29 +97,29 @@ func (s *Spinner) SetStyle(style SpinnerStyle) {
 		// Use line spinner as ASCII-safe alternative to braille
 		s.spinner.Spinner = spinner.Spinner{
 			Frames: []string{"|", "/", "-", "\\"},
-			FPS:    time.Second / 10,
+			FPS:    time.Second / 30, // 30fps to match streaming
 		}
 	case SpinnerDots:
 		s.spinner.Spinner = spinner.Spinner{
 			Frames: []string{".  ", ".. ", "...", " ..", "  .", "   "},
-			FPS:    time.Second / 6,
+			FPS:    time.Second / 30, // 30fps to match streaming
 		}
 	case SpinnerLine:
 		s.spinner.Spinner = spinner.Spinner{
 			Frames: []string{"|", "/", "-", "\\"},
-			FPS:    time.Second / 10,
+			FPS:    time.Second / 30, // 30fps to match streaming
 		}
 	case SpinnerPulse:
 		// ASCII alternative to pulsing circles
 		s.spinner.Spinner = spinner.Spinner{
 			Frames: []string{"( )", "(o)", "(O)", "(o)"},
-			FPS:    time.Second / 8,
+			FPS:    time.Second / 30, // 30fps to match streaming
 		}
 	case SpinnerBlock:
 		// ASCII alternative to block animation
 		s.spinner.Spinner = spinner.Spinner{
 			Frames: []string{"[    ]", "[=   ]", "[==  ]", "[=== ]", "[====]", "[ ===]", "[  ==]", "[   =]"},
-			FPS:    time.Second / 15,
+			FPS:    time.Second / 30, // 30fps to match streaming
 		}
 	}
 }
@@ -364,7 +364,7 @@ func NewInlineSpinner() InlineSpinner {
 	s := spinner.New()
 	s.Spinner = spinner.Spinner{
 		Frames: []string{"|", "/", "-", "\\"},
-		FPS:    time.Second / 10,
+		FPS:    time.Second / 30, // 30fps to match streaming
 	}
 	return InlineSpinner{spinner: s}
 }

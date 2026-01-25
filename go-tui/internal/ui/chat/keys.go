@@ -27,7 +27,6 @@ type KeyMap struct {
 	End       key.Binding
 	Submit    key.Binding
 	Cancel    key.Binding
-	Copy      key.Binding
 	Help      key.Binding
 	Quit      key.Binding
 	Search    key.Binding
@@ -70,11 +69,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		Cancel: key.NewBinding(
 			key.WithKeys("esc", "ctrl+c"),
-			key.WithHelp("Esc/C-c", "cancel"),
-		),
-		Copy: key.NewBinding(
-			key.WithKeys("ctrl+c"),
-			key.WithHelp("C-c", "copy/cancel"),
+			key.WithHelp("Esc/C-c", "cancel streaming"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
@@ -146,14 +141,15 @@ func GetHelpItems() []HelpItem {
 		{"PgUp/C-u, PgDn/C-d", "Page up/down"},
 		{"Home/g, End/G", "Top/bottom"},
 		{"Enter", "Send message"},
-		{"C-c", "Cancel/copy"},
+		{"C-c", "Cancel streaming"},
+		{"C-q", "Quit (emergency exit)"},
 		{"C-l", "Clear screen"},
 		{"C-k", "Multi-line mode"},
 		{"C-f or /", "Search"},
 		{"C-r", "Cycle routing mode"},
 		{"/command", "Run command"},
 		{"?", "Toggle help"},
-		{"q or C-q", "Quit"},
+		{"q", "Quit (normal mode)"},
 	}
 }
 

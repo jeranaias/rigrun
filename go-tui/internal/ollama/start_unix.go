@@ -102,7 +102,12 @@ func (c *Client) startOllamaProcess(ctx context.Context) error {
 
 	// Wait for Ollama to become ready (poll for up to 10 seconds)
 	deadline := time.Now().Add(10 * time.Second)
+	startTime := time.Now()
 	var lastErr error
+
+	// Print initial status
+	fmt.Fprintf(os.Stderr, "Starting Ollama service...\n")
+
 	for time.Now().Before(deadline) {
 		// Check if parent context was cancelled
 		select {
@@ -121,12 +126,20 @@ func (c *Client) startOllamaProcess(ctx context.Context) error {
 		cancel()
 
 		if lastErr == nil {
+			elapsed := time.Since(startTime)
+			fmt.Fprintf(os.Stderr, "Ollama service started successfully (%.1fs)\n", elapsed.Seconds())
 			return nil // Started successfully
 		}
+
+		// Show progress with elapsed time
+		elapsed := time.Since(startTime)
+		fmt.Fprintf(os.Stderr, "\rStarting Ollama service... %.1fs elapsed", elapsed.Seconds())
 
 		// Wait before retrying
 		time.Sleep(500 * time.Millisecond)
 	}
+
+	fmt.Fprintf(os.Stderr, "\n")
 
 	return &ClientError{
 		Type:    ErrTypeConnection,

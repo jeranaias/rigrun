@@ -511,6 +511,21 @@ func NewModelWithConfig(theme *styles.Theme, ollamaClient *ollama.Client, cfg *c
 		if cfg.Cloud.DefaultModel != "" {
 			cloudClient.SetModel(cfg.Cloud.DefaultModel)
 		}
+
+		// Test cloud connectivity at startup and warn if unavailable
+		// Use a simple models list request to verify connectivity
+		testCtx, testCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_, err := cloudClient.ListModels(testCtx)
+		testCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n")
+			fmt.Fprintf(os.Stderr, "*** CLOUD CONNECTIVITY WARNING ***\n")
+			fmt.Fprintf(os.Stderr, "OpenRouter cloud service is unavailable: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Routing will fall back to local Ollama only.\n")
+			fmt.Fprintf(os.Stderr, "\n")
+			// Still set the client - it will fail gracefully and fall back to local
+		}
+
 		// Pass cloud client to chat model for cloud routing
 		chatModel.SetCloudClient(cloudClient)
 	}
@@ -756,6 +771,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // handleKeyPress processes keyboard input.
 func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Emergency exit - Ctrl+Q always quits regardless of state
+	if msg.String() == "ctrl+q" {
+		return m, tea.Quit
+	}
+
 	// ==========================================================================
 	// IL5 AC-12: Reset session timeout on any user activity
 	// ==========================================================================
@@ -835,14 +855,20 @@ func (m *Model) handleKeyPress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.state == StateChat {
 		switch msg.String() {
 		case "ctrl+c":
-			// If streaming, cancel it
+			// If streaming, cancel it and clean up state
 			if m.cancelStream != nil {
 				m.cancelStream()
 				m.cancelStream = nil
+				m.streamingMsgID = ""
+				m.streamStats = nil
+				m.resetAgenticState()
+				// Add system message indicating cancellation with recovery hint
+				m.chatModel.GetConversation().AddSystemMessage("Stream cancelled. Press Enter to continue.")
+				m.chatModel.SetConversation(m.chatModel.GetConversation())
 				return m, nil
 			}
-			// Otherwise quit
-			return m, tea.Quit
+			// Ctrl+C only cancels streaming, does not quit
+			return m, nil
 
 		case "ctrl+l":
 			// Clear screen - send message to chat model

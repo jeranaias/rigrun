@@ -229,44 +229,11 @@ func TestStatusIndicators(t *testing.T) {
 }
 
 // =============================================================================
-// ACCESSIBILITY CONFIG TESTS
+// ACCESSIBILITY TESTS
 // =============================================================================
 
-func TestDefaultAccessibilityConfig(t *testing.T) {
-	config := DefaultAccessibilityConfig()
-
-	if config.HighContrast {
-		t.Error("DefaultAccessibilityConfig() HighContrast should be false")
-	}
-
-	if !config.UseShapes {
-		t.Error("DefaultAccessibilityConfig() UseShapes should be true")
-	}
-
-	if config.ColorblindMode != "normal" {
-		t.Errorf("DefaultAccessibilityConfig() ColorblindMode = %q, want %q",
-			config.ColorblindMode, "normal")
-	}
-}
-
-func TestAccessibilityConfigStruct(t *testing.T) {
-	config := AccessibilityConfig{
-		HighContrast:   true,
-		UseShapes:      false,
-		ColorblindMode: "deuteranopia",
-	}
-
-	if !config.HighContrast {
-		t.Error("AccessibilityConfig.HighContrast should be true")
-	}
-	if config.UseShapes {
-		t.Error("AccessibilityConfig.UseShapes should be false")
-	}
-	if config.ColorblindMode != "deuteranopia" {
-		t.Errorf("AccessibilityConfig.ColorblindMode = %q, want %q",
-			config.ColorblindMode, "deuteranopia")
-	}
-}
+// Note: AccessibilityConfig was removed as accessibility features are always enabled.
+// StatusIndicators provide shape-based indicators for all users by default.
 
 // =============================================================================
 // RENDER FUNCTION TESTS

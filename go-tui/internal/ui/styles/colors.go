@@ -106,27 +106,27 @@ var ToolErrorBg = lipgloss.AdaptiveColor{Light: "#FEE2E2", Dark: "#881337"}
 var ToolErrorFg = lipgloss.AdaptiveColor{Light: "#991B1B", Dark: "#FECACA"}
 
 // =============================================================================
-// SYNTAX HIGHLIGHTING (Catppuccin Mocha inspired)
+// SYNTAX HIGHLIGHTING (Catppuccin Latte/Mocha)
 // =============================================================================
 
-var SyntaxKeyword = lipgloss.Color("#CBA6F7")  // Mauve
-var SyntaxString = lipgloss.Color("#A6E3A1")   // Green
-var SyntaxNumber = lipgloss.Color("#FAB387")   // Peach
-var SyntaxComment = lipgloss.Color("#6C7086")  // Overlay0
-var SyntaxFunction = lipgloss.Color("#89B4FA") // Blue
-var SyntaxType = lipgloss.Color("#F9E2AF")     // Yellow
-var SyntaxOperator = lipgloss.Color("#89DCEB") // Sky
-var SyntaxVariable = lipgloss.Color("#F5C2E7") // Pink
-var SyntaxConstant = lipgloss.Color("#FAB387") // Peach
-var SyntaxBuiltin = lipgloss.Color("#F38BA8")  // Red
+var SyntaxKeyword = lipgloss.AdaptiveColor{Light: "#8839EF", Dark: "#CBA6F7"}   // Mauve
+var SyntaxString = lipgloss.AdaptiveColor{Light: "#40A02B", Dark: "#A6E3A1"}    // Green
+var SyntaxNumber = lipgloss.AdaptiveColor{Light: "#FE640B", Dark: "#FAB387"}    // Peach
+var SyntaxComment = lipgloss.AdaptiveColor{Light: "#9CA0B0", Dark: "#6C7086"}   // Overlay0
+var SyntaxFunction = lipgloss.AdaptiveColor{Light: "#1E66F5", Dark: "#89B4FA"}  // Blue
+var SyntaxType = lipgloss.AdaptiveColor{Light: "#DF8E1D", Dark: "#F9E2AF"}      // Yellow
+var SyntaxOperator = lipgloss.AdaptiveColor{Light: "#04A5E5", Dark: "#89DCEB"}  // Sky
+var SyntaxVariable = lipgloss.AdaptiveColor{Light: "#EA76CB", Dark: "#F5C2E7"}  // Pink
+var SyntaxConstant = lipgloss.AdaptiveColor{Light: "#FE640B", Dark: "#FAB387"}  // Peach
+var SyntaxBuiltin = lipgloss.AdaptiveColor{Light: "#D20F39", Dark: "#F38BA8"}   // Red
 
 // =============================================================================
 // SPECIAL EFFECTS
 // =============================================================================
 
 // Gradient start/end for header effects
-var GradientStart = lipgloss.Color("#7C3AED") // Purple
-var GradientEnd = lipgloss.Color("#22D3EE")   // Cyan
+var GradientStart = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"} // Purple
+var GradientEnd = lipgloss.AdaptiveColor{Light: "#0891B2", Dark: "#22D3EE"}   // Cyan
 
 // Focus ring color
 var FocusRing = Cyan
@@ -160,23 +160,15 @@ var StatusIndicators = StatusIndicatorSet{
 	Active:  "[*]",    // ASCII filled for active
 }
 
-// AccessibilityConfig provides options for accessibility features.
-// ACCESSIBILITY: Configuration for colorblind and high-contrast modes.
-type AccessibilityConfig struct {
-	HighContrast   bool   // Enable high contrast color pairs
-	UseShapes      bool   // Always show shapes alongside colors
-	ColorblindMode string // "normal", "deuteranopia", "protanopia", "tritanopia"
-}
-
-// DefaultAccessibilityConfig returns the default accessibility configuration.
-// By default, shapes are enabled for better accessibility.
-func DefaultAccessibilityConfig() AccessibilityConfig {
-	return AccessibilityConfig{
-		HighContrast:   false,
-		UseShapes:      true, // Always show shapes by default for colorblind users
-		ColorblindMode: "normal",
-	}
-}
+// NOTE: AccessibilityConfig is not currently implemented for runtime switching.
+// The StatusIndicators system is always enabled and provides shape-based indicators
+// for colorblind accessibility. If runtime accessibility mode switching is needed in
+// the future, implement it as part of the config package with persistence.
+//
+// For now, accessibility features are always on:
+// - StatusIndicators always include ASCII shape indicators ([OK], [X], [!], [i])
+// - High contrast colors are used throughout the theme
+// - No runtime toggling is needed
 
 // =============================================================================
 // ACCESSIBILITY: High-contrast color pairs for colorblind users

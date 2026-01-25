@@ -12,6 +12,10 @@ import (
 	"github.com/jeranaias/rigrun-tui/internal/ollama"
 )
 
+// MaxMessages is the maximum number of messages to keep in conversation history.
+// When exceeded, old messages are pruned to prevent unbounded memory growth.
+const MaxMessages = 1000
+
 // =============================================================================
 // CONVERSATION TYPE
 // =============================================================================
@@ -67,6 +71,7 @@ func (c *Conversation) AddMessage(msg *Message) {
 	c.UpdatedAt = time.Now()
 	c.updateTokenEstimate()
 	c.updateTitle()
+	c.pruneOldMessages()
 }
 
 // AddUserMessage creates and adds a user message.
@@ -451,4 +456,36 @@ func (c *Conversation) Clone() *Conversation {
 	}
 
 	return clone
+}
+
+// pruneOldMessages removes old messages when conversation history exceeds MaxMessages.
+// Keeps the system prompt message (if any) and the most recent MaxMessages messages.
+func (c *Conversation) pruneOldMessages() {
+	if len(c.Messages) <= MaxMessages {
+		return
+	}
+
+	// Find system prompt messages to preserve
+	var systemMessages []*Message
+	var otherMessages []*Message
+	for _, msg := range c.Messages {
+		if msg.Role == RoleSystem {
+			systemMessages = append(systemMessages, msg)
+		} else {
+			otherMessages = append(otherMessages, msg)
+		}
+	}
+
+	// If we have more than MaxMessages non-system messages, keep only the last MaxMessages
+	if len(otherMessages) > MaxMessages {
+		// Keep system messages + last MaxMessages non-system messages
+		keepCount := MaxMessages
+		startIdx := len(otherMessages) - keepCount
+		otherMessages = otherMessages[startIdx:]
+	}
+
+	// Rebuild messages: system messages first, then conversation messages
+	c.Messages = make([]*Message, 0, len(systemMessages)+len(otherMessages))
+	c.Messages = append(c.Messages, systemMessages...)
+	c.Messages = append(c.Messages, otherMessages...)
 }

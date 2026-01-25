@@ -760,6 +760,7 @@ func (m *Model) renderStats(msg *model.Message) string {
 // renderRoutingInfo renders routing information for a message.
 // Shows tier used (icon + name), token count, and cost if cloud tier.
 // Example: "* Cloud (Sonnet) - 234 tokens - 0.05c"
+// Cache hits show: "⚡ Cached (Exact)"
 func (m *Model) renderRoutingInfo(msg *model.Message) string {
 	if msg.RoutingTier == "" {
 		return ""
@@ -768,10 +769,14 @@ func (m *Model) renderRoutingInfo(msg *model.Message) string {
 	// Parse tier from string
 	tier := parseTier(msg.RoutingTier)
 
-	// Get icon for tier
+	// Get icon for tier - use lightning bolt for cache hits
 	icon, ok := components.TierIcons[tier]
 	if !ok {
 		icon = "?"
+	}
+	// Override icon for cache hits with lightning bolt
+	if tier == router.TierCache {
+		icon = "⚡"
 	}
 
 	// Build routing info string

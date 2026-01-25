@@ -56,8 +56,9 @@ type Model struct {
 	theme *styles.Theme
 
 	// Dimensions
-	width  int
-	height int
+	width      int
+	height     int
+	lastResize time.Time // For resize debouncing
 
 	// Conversation
 	conversation *model.Conversation
@@ -204,7 +205,7 @@ func New(theme *styles.Theme) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Spinner{
 		Frames: []string{"|", "/", "-", "\\"},
-		FPS:    time.Second / 10,
+		FPS:    time.Second / 30, // 30fps to match streaming
 	}
 
 	// Initialize tool system
@@ -517,6 +518,19 @@ func (m Model) View() string {
 // =============================================================================
 
 func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	// Resize debouncing: Only apply resize after 100ms of stability
+	// This prevents render storms during window drag operations
+	now := time.Now()
+	if !m.lastResize.IsZero() && now.Sub(m.lastResize) < 100*time.Millisecond {
+		// Too soon after last resize - schedule a delayed resize check
+		m.lastResize = now
+		return m, func() tea.Msg {
+			time.Sleep(100 * time.Millisecond)
+			return msg
+		}
+	}
+	m.lastResize = now
+
 	m.width = msg.Width
 	m.height = msg.Height
 
@@ -599,6 +613,12 @@ func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Emergency exit - Ctrl+Q always quits regardless of state
+	keyStr := msg.String()
+	if keyStr == "ctrl+q" {
+		return m, tea.Quit
+	}
+
 	// Handle tutorial overlay first - it has priority when visible
 	if m.tutorial != nil && m.tutorial.IsVisible() {
 		var cmd tea.Cmd
@@ -615,7 +635,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// Handle help overlay first - any key dismisses it except navigation
 	if m.showHelp {
-		switch msg.String() {
+		switch keyStr {
 		case "?", "esc", "q", "enter":
 			m.showHelp = false
 			return m, nil
@@ -640,8 +660,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	keyStr := msg.String()
-
 	// ==========================================================================
 	// GLOBAL KEYS - work in any state
 	// ==========================================================================
@@ -649,22 +667,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch keyStr {
 	case "ctrl+c":
 		if m.state == StateStreaming {
-			// Cancel streaming (thread-safe)
+			// Cancel streaming (thread-safe) and clean up all related state
 			m.cancel()
 			m.state = StateReady
 			m.isThinking = false
 			m.streamingMsgID = ""
 			m.pendingQuery = ""
 			m.pendingMsgID = ""
+			// Clean up cache and query tracking state
+			m.lastCacheHit = 0 // Reset to CacheHitNone
+			m.currentQueryTier = 0 // Reset tier
+			m.currentQueryStart = time.Time{} // Zero time
 			m.input.Focus()
 			m.inputMode = true
+			// Mark the last message as incomplete if it exists
+			if lastMsg := m.conversation.GetLastMessage(); lastMsg != nil && lastMsg.Role == "assistant" && lastMsg.Content != "" {
+				m.conversation.AppendToLast(" [incomplete - cancelled]")
+			}
 			return m, textinput.Blink
 		}
-		return m, tea.Quit
-
-	case "ctrl+q":
-		// Force quit
-		return m, tea.Quit
+		// Ctrl+C only cancels streaming or does nothing (removed quit behavior)
+		return m, nil
 
 	case "ctrl+p":
 		// Toggle command palette
@@ -1344,6 +1367,10 @@ func (m Model) handleModelSwitched(msg OllamaModelSwitchedMsg) (tea.Model, tea.C
 		m.ollama.SetModel(msg.Model)
 	}
 	m.conversation.Model = msg.Model
+
+	// Add system message to provide user feedback
+	m.conversation.AddSystemMessage("✓ Switched to model: " + msg.Model)
+	m.updateViewport()
 
 	return m, nil
 }
