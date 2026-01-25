@@ -96,6 +96,10 @@ func HandleBackup(args Args) error {
 	confirmFlag := false
 
 	for i, arg := range args.Raw {
+		// Skip the subcommand itself (first element of Raw)
+		if i == 0 && arg == args.Subcommand {
+			continue
+		}
 		switch arg {
 		case "--confirm":
 			confirmFlag = true
@@ -113,7 +117,6 @@ func HandleBackup(args Args) error {
 				}
 			}
 		}
-		_ = i // Suppress unused variable warning
 	}
 
 	switch args.Subcommand {

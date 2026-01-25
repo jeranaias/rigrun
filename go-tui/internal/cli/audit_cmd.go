@@ -647,10 +647,16 @@ func formatAuditEntry(entry AuditEntry) {
 	timestamp := entry.Timestamp.Format("2006-01-02 15:04:05")
 
 	// Build the entry line
+	sessionIDDisplay := entry.SessionID
+	if len(sessionIDDisplay) > 8 {
+		sessionIDDisplay = sessionIDDisplay[:8] + "..."
+	} else if sessionIDDisplay == "" {
+		sessionIDDisplay = "--------"
+	}
 	fmt.Printf("%s  %s  %s",
 		auditDimStyle.Render(timestamp),
 		typeStyle.Render(fmt.Sprintf("%-16s", entry.EventType)),
-		auditDimStyle.Render(entry.SessionID[:8]+"..."))
+		auditDimStyle.Render(sessionIDDisplay))
 
 	// Add tier if present
 	if entry.Tier != "" {

@@ -589,6 +589,12 @@ func (bm *BackupManager) ListBackups() ([]*Backup, error) {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 
+	return bm.listBackupsUnlocked()
+}
+
+// listBackupsUnlocked is the internal implementation that doesn't acquire locks.
+// Caller must hold at least a read lock.
+func (bm *BackupManager) listBackupsUnlocked() ([]*Backup, error) {
 	entries, err := os.ReadDir(bm.backupDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read backup directory: %w", err)
@@ -788,7 +794,7 @@ func (bm *BackupManager) GetBackupStatus() (*BackupStatus, error) {
 
 // applyRetentionPolicyLocked applies the backup retention policy (caller must hold lock).
 func (bm *BackupManager) applyRetentionPolicyLocked() error {
-	backups, err := bm.ListBackups()
+	backups, err := bm.listBackupsUnlocked()
 	if err != nil {
 		return err
 	}
