@@ -1,0 +1,67 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+rigrun
+rigrun-installer
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Go workspace file
+go.work
+
+# IDE/Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
+
+# Local config (may contain secrets)
+.rigrun/
+config.local.toml
+
+# Logs
+*.log
+logs/
+
+# Internal documentation (implementation details, security analysis)
+# These files should not be in the public repo
+*_IMPLEMENTATION*.md
+*_PLAN*.md
+*_CHECKLIST*.md
+*_INTEGRATION*.md
+*_SUMMARY*.md
+*_BUGFIXES*.md
+*_FIXES*.md
+*_DEMO*.md
+*_REPORT*.md
+*_GUIDE*.md
+*_OPTIMIZATION*.md
+*_MATRIX*.md
+*_ANALYSIS*.md
+PORTING_*.md
+SPILLAGE_*.md
+
+# Keep these public docs:
+# README.md
+# INSTALL.md
+# VIM_QUICK_REFERENCE.md
+# internal/*/README.md (package docs)
+# internal/*/QUICKSTART.md (package docs)
+# docs/OPENROUTER_FREE_MODELS.md
