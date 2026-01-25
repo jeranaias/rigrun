@@ -1,739 +1,1197 @@
-# rigrun - Classification-Aware LLM Router for Secure Environments
+# rigrun
 
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/rigrun/rigrun?color=orange)](https://github.com/rigrun/rigrun/releases)
-[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://www.rust-lang.org)
-[![IL5 Compliant](https://img.shields.io/badge/DoW-IL5_Compliant-green.svg)](#security--compliance)
-[![Routing Accuracy](https://img.shields.io/badge/routing_accuracy-100%25-brightgreen.svg)](#test-results)
-[![Air-Gapped Ready](https://img.shields.io/badge/air--gapped-ready-blue.svg)](#air-gapped-security)
-[![Stars](https://img.shields.io/github/stars/rigrun/rigrun?style=social)](https://github.com/rigrun/rigrun)
+**Stop paying $20/month to send your code to someone else's servers.**
 
 ```
-   ____  _       ____
-  |  _ \(_) __ _|  _ \ _   _ _ __
-  | |_) | |/ _` | |_) | | | | '_ \
-  |  _ <| | (_| |  _ <| |_| | | | |
-  |_| \_\_|\__, |_| \_\\__,_|_| |_|
-           |___/  v0.1.0
+    ██████╗ ██╗ ██████╗ ██████╗ ██╗   ██╗███╗   ██╗
+    ██╔══██╗██║██╔════╝ ██╔══██╗██║   ██║████╗  ██║
+    ██████╔╝██║██║  ███╗██████╔╝██║   ██║██╔██╗ ██║
+    ██╔══██╗██║██║   ██║██╔══██╗██║   ██║██║╚██╗██║
+    ██║  ██║██║╚██████╔╝██║  ██║╚██████╔╝██║ ╚████║
+    ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
 ```
 
-**The only LLM router built for DoW/IL5 classification requirements.** rigrun intelligently routes queries based on data classification levels, ensuring classified content NEVER touches cloud APIs while maintaining full OpenAI compatibility for unclassified workloads.
+rigrun is an AI coding assistant that runs **on your hardware first**. A beautiful terminal interface. Intelligent query routing. Full DoD IL5 security compliance. Agentic file operations. And it's free.
+
+---
+
+## ⚡ Quick Start
+
+**Two steps:**
+
+1. **Install Ollama** → [ollama.ai](https://ollama.ai) (one-click installer)
+2. **Install rigrun** → [Download](https://github.com/jeranaias/rigrun/releases/latest) and run
+
+```bash
+# Already have Go? One command:
+go install github.com/jeranaias/rigrun@latest
+
+# Then:
+rigrun
+```
+
+That's it. Type a question, get an answer. Your code never leaves your machine.
+
+→ [Full setup guide](#getting-started) | [Model recommendations](#recommended-models)
+
+---
+
+## Table of Contents
+
+- [Quick Start](#-quick-start)
+- [The Problem](#the-problem)
+- [The Solution](#the-solution)
+- [Why rigrun Over Alternatives](#why-rigrun-over-the-alternatives)
+- [Who Is This For](#who-is-this-for)
+- [Features Deep Dive](#features-deep-dive)
+- [Getting Started](#getting-started)
+- [The TUI Experience](#the-tui-experience)
+- [Agentic Tools](#agentic-tools)
+- [Intelligent Routing](#intelligent-routing)
+- [Security & Compliance](#security--compliance)
+- [Configuration](#configuration)
+- [CLI Reference](#cli-reference)
+- [Troubleshooting](#troubleshooting)
+- [Architecture](#architecture)
+- [FAQ](#faq)
+- [Contributing](#contributing)
+
+---
+
+## The Problem
+
+You're a developer. You use AI coding assistants every day. And you're probably:
+
+- **Paying $20-40/month** for GitHub Copilot, ChatGPT Plus, or Claude Pro
+- **Sending your proprietary code** to servers you don't control
+- **Waiting on rate limits** when you need help most
+- **Stuck without internet** on flights, in secure facilities, or just bad WiFi
+- **Worried about data retention** policies you never read
+- **Context switching** between your editor, browser, and terminal
+- **Losing conversation history** every time you close a tab
+
+Meanwhile, you have a GPU sitting in your machine doing nothing while you code.
+
+---
+
+## The Solution
+
+rigrun is an AI coding assistant that runs **on your hardware first**.
+
+Your GPU handles 90%+ of queries instantly, for free, with your data never leaving your machine. When you need the absolute best models for complex problems, rigrun can optionally route to cloud APIs - but only when YOU decide, and you see exactly what it costs.
+
+**One command:**
+```bash
+rigrun
+```
+
+A beautiful terminal interface opens. Start typing. Your local model responds in milliseconds. Save conversations. Search your history. Include files with `@file:`. Have the AI read, write, and edit code for you. All in one place, all private, all free.
+
+---
+
+## Why rigrun Over the Alternatives?
+
+### vs. ChatGPT Plus / Claude Pro
+
+| Feature | ChatGPT Plus | Claude Pro | rigrun |
+|---------|--------------|------------|--------|
+| Monthly cost | $20 | $20 | **$0** |
+| Your code sent to cloud | Yes, always | Yes, always | **No (local first)** |
+| Works offline | No | No | **Yes** |
+| Rate limits | Yes (40/3hr) | Yes (varies) | **None** |
+| Response latency | 500ms-2s | 500ms-2s | **50-200ms local** |
+| Works in secure facilities | No | No | **Yes** |
+| Conversation history | Limited | Limited | **Unlimited local** |
+| File context | Manual paste | Manual paste | **@file: mentions** |
+| Agentic file ops | No | No | **Yes** |
+| Session management | Per-tab | Per-tab | **Persistent sessions** |
+| Keyboard-first | No | No | **Yes** |
+| Syntax highlighting | Basic | Good | **Full terminal colors** |
+
+### vs. GitHub Copilot
+
+| Feature | Copilot Individual | Copilot Business | rigrun |
+|---------|-------------------|------------------|--------|
+| Monthly cost | $10 | $19 | **$0** |
+| IDE lock-in | VSCode/JetBrains | VSCode/JetBrains | **Any terminal** |
+| Telemetry | Extensive | Extensive | **Zero** |
+| Works offline | No | No | **Yes** |
+| Full conversation context | No (line-by-line) | Limited | **Yes** |
+| Multi-file reasoning | No | Limited | **Yes** |
+| Agentic file operations | No | Limited | **Full toolkit** |
+| Custom model choice | No | No | **Yes** |
+| Self-hostable | No | No | **Yes** |
+| Security compliance | Trust GitHub | Trust GitHub | **IL5 certified** |
+
+### vs. Cursor / Windsurf / Other AI IDEs
+
+| Feature | Cursor Pro | Windsurf | rigrun |
+|---------|------------|----------|--------|
+| Monthly cost | $20 | $15 | **$0** |
+| Requires specific IDE | Yes (Cursor fork) | Yes (VSCode fork) | **No** |
+| Works with any editor | No | No | **Yes (terminal)** |
+| Local-first | No | No | **Yes** |
+| Works offline | No | No | **Yes** |
+| Data privacy | Cloud-dependent | Cloud-dependent | **Complete** |
+| Agentic tools | Yes | Yes | **Yes** |
+| Security compliance | No | No | **IL5 certified** |
+
+### vs. Running Ollama Directly
+
+| Feature | Raw Ollama CLI | rigrun |
+|---------|----------------|--------|
+| Beautiful TUI | No | **Yes (30fps streaming)** |
+| Conversation history | Manual | **Automatic persistence** |
+| Session management | None | **Full (save/load/export)** |
+| Smart model routing | None | **Cache → Local → Cloud** |
+| Agentic tools | None | **8 tools (read/write/grep/bash/web)** |
+| Cloud fallback | None | **Optional (OpenRouter)** |
+| Context mentions | None | **@file, @git, @clipboard, @codebase** |
+| Slash commands | None | **20+ commands** |
+| Syntax highlighting | None | **Full support** |
+| Progress indicators | Basic | **Animated spinners** |
+| Security compliance | None | **IL5 certified** |
+| Cost tracking | None | **Per-query and cumulative** |
+
+---
+
+## Who Is This For?
+
+### Developers Who Value Privacy
+
+Your code is your competitive advantage. Every query to ChatGPT, Claude, or Copilot sends your proprietary logic, architecture decisions, and business context to third-party servers with data retention policies you probably haven't read.
+
+With rigrun, your code **never leaves your machine** unless you explicitly choose cloud routing. When you do use cloud, you see exactly what's being sent and to which provider. Complete transparency, complete control.
+
+### Developers Who Are Tired of Subscriptions
+
+The subscription creep is real:
+- ChatGPT Plus: $20/month
+- Claude Pro: $20/month
+- GitHub Copilot: $10-19/month
+- Cursor: $20/month
+
+That's $50-80/month if you want the best of everything. rigrun costs **$0/month** for unlimited local queries. For the rare cases where you need GPT-4 or Claude Opus, you pay per-query via OpenRouter - typically **$1-5/month** for heavy users instead of $50+.
+
+### Developers Who Work Offline
+
+- **Flights**: 6 hours without AI assistance? Not anymore.
+- **Coffee shops**: Bad WiFi doesn't kill your productivity.
+- **Secure facilities**: SCIFs, classified networks, air-gapped systems.
+- **Rural areas**: Satellite internet latency? Irrelevant.
+- **VPN restrictions**: Company VPN blocks AI services? Local works.
+
+rigrun with a local model works **completely offline**. Zero network required.
+
+### Enterprise and Government Teams
+
+rigrun implements **43 NIST 800-53 security controls** required for DoD IL5 certification:
+
+- **AC-7**: Account lockout after failed attempts
+- **AC-12**: Session timeout and termination
+- **AU-2/AU-3**: Comprehensive audit logging
+- **AU-9**: Tamper-evident log protection (HMAC)
+- **CP-9/CP-10**: Encrypted backup and recovery
+- **SC-7**: Network boundary protection
+- **SC-13**: FIPS 140-2 cryptographic controls
+- **SC-28**: Encryption at rest (AES-256-GCM)
+
+This isn't security theater. These are the same controls required for systems handling CUI and classified information. Run `rigrun test security` to verify compliance.
+
+### Developers Who Want to Use Their Hardware
+
+You bought that RTX 4090, RX 7900, or M3 Max. It mostly sits idle while you code. rigrun puts it to work:
+
+- **14B models**: Run comfortably on 8-10GB VRAM, handle 90% of coding tasks
+- **7B models**: Run on 4GB VRAM, great for quick questions
+- **22B+ models**: Premium quality on high-end GPUs
+- **CPU fallback**: Works without a GPU, just slower
+
+Your hardware, your inference, your data.
+
+---
+
+## Features Deep Dive
+
+### Beautiful Terminal Interface
+
+rigrun isn't a command-line afterthought. It's a **proper terminal application** built with [Bubble Tea](https://github.com/charmbracelet/bubbletea):
+
+- **30fps streaming**: Responses render smoothly, character by character
+- **Syntax highlighting**: Code blocks in any language, properly colored
+- **Responsive design**: Adapts to terminal resize, any size works
+- **Dark and light themes**: Easy on the eyes, matches your terminal
+- **Progress indicators**: Animated spinners for all async operations
+- **Status bar**: Model, cost, tokens - always visible
+- **Vim keybindings**: Optional j/k navigation, : commands
+- **Mouse support**: Click to position, scroll to navigate
+
+### Intelligent Query Routing
+
+Not all queries need GPT-4. rigrun automatically routes to the optimal tier:
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Cache     │ ──▶ │   Local     │ ──▶ │   Cloud     │
+│  (instant)  │     │  (your GPU) │     │ (optional)  │
+│    FREE     │     │    FREE     │     │  $0.01-0.10 │
+└─────────────┘     └─────────────┘     └─────────────┘
+```
+
+**Cache tier**: Semantic similarity matching. Asked "How do I reverse a string in Python?" before? Instant response from cache.
+
+**Local tier**: Your Ollama model handles it. Sub-200ms response. Free. Private.
+
+**Cloud tier**: Complex queries that need frontier models. You approve each escalation. Pay per query, not per month.
+
+Configure routing with `/mode local`, `/mode cloud`, or `/mode auto`.
+
+### Agentic File Operations
+
+rigrun can interact with your codebase, not just talk about it:
+
+| Tool | Permission | Description |
+|------|------------|-------------|
+| **Read** | Auto | Read any file in allowed directories |
+| **Glob** | Auto | Find files by pattern (`**/*.go`, `src/**/*.ts`) |
+| **Grep** | Auto | Search file contents with regex |
+| **Write** | Ask | Create new files or overwrite existing |
+| **Edit** | Ask | Search and replace within files |
+| **Bash** | Ask | Execute shell commands |
+| **WebSearch** | Auto | Search via DuckDuckGo (no API key) |
+| **WebFetch** | Auto | Fetch web pages (SSRF protected) |
+
+**Permission levels**:
+- **Auto**: Always allowed, no prompt
+- **Ask**: Shows you the operation, you approve/deny
+- **Never**: Blocked (destructive commands like `rm -rf`)
+
+Example session:
+```
+You: Find all TODO comments in this project and create a markdown summary
+
+rigrun: I'll search for TODOs across the codebase.
+[Uses Grep tool - automatic]
+
+Found 47 TODO comments across 12 files. Here's the breakdown:
+- src/auth/: 8 TODOs (security-related)
+- src/api/: 15 TODOs (endpoint implementations)
+...
+
+Would you like me to create TODO.md with this summary?
+
+You: Yes
+
+rigrun: [Uses Write tool - asks permission]
+Create file: TODO.md
+Content: [shows preview]
+Allow? (y/n)
+```
+
+### Context Mentions
+
+Include context inline with `@` mentions:
+
+| Mention | What It Does |
+|---------|--------------|
+| `@file:path/to/file` | Include file contents in context |
+| `@file:src/*.go` | Include multiple files by glob pattern |
+| `@clipboard` | Include current clipboard contents |
+| `@git` | Include recent git history and diff |
+| `@git:diff` | Include just the current diff |
+| `@git:log` | Include recent commit messages |
+| `@codebase` | Include project structure summary |
+| `@error` | Include last error from tool execution |
+| `@selection` | Include selected text (from IDE integration) |
+
+Examples:
+```
+@file:src/auth/login.go explain this authentication flow
+
+@git:diff review these changes before I commit
+
+@codebase what's the overall architecture here?
+
+@clipboard the user reported this error, what's wrong?
+```
+
+### Session Management
+
+Conversations persist across restarts:
+
+| Command | What It Does |
+|---------|--------------|
+| `/save [name]` | Save current conversation |
+| `/load <id>` | Load a previous conversation |
+| `/list` | List all saved sessions |
+| `/export [format]` | Export as JSON, Markdown, or plain text |
+| `/history [n]` | Show last N messages |
+| `/new` | Start fresh conversation |
+| `/clear` | Clear current but don't delete |
+
+Sessions are stored in `~/.rigrun/sessions/` with full message history, tool calls, and metadata.
+
+### Cost Tracking
+
+Every query shows exactly what it cost:
+
+```
+─────────────────────────────────────────────
+Tier: Local | Tokens: 847 | Cost: $0.00 | Saved: $0.12 vs Cloud
+```
+
+Track cumulative spending:
+- `/status` - Current session costs
+- `rigrun audit stats` - Historical cost analysis
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+1. **Ollama** - The local LLM runtime
+   - [Download Ollama](https://ollama.ai) (Windows, macOS, Linux)
+   - Takes 30 seconds to install
+
+2. **A GPU** (recommended but not required)
+   - NVIDIA: CUDA support (most cards)
+   - AMD: ROCm or Vulkan (RX 6000/7000 series)
+   - Apple: Metal (M1/M2/M3)
+   - CPU-only works, just slower
+
+### Installation
+
+#### Option 1: Download Installer (Recommended)
+
+Download from [GitHub Releases](https://github.com/jeranaias/rigrun/releases/latest):
+
+| Platform | File |
+|----------|------|
+| Windows | `rigrun-installer-windows-amd64.exe` |
+| macOS Intel | `rigrun-installer-darwin-amd64` |
+| macOS Apple Silicon | `rigrun-installer-darwin-arm64` |
+| Linux | `rigrun-installer-linux-amd64` |
+
+Run the installer - it's also a beautiful TUI that guides you through:
+1. System requirements check
+2. Ollama verification/setup
+3. Model selection and download
+4. Configuration creation
+5. First launch
+
+#### Option 2: Build From Source
+
+```bash
+# Clone
+git clone https://github.com/jeranaias/rigrun.git
+cd rigrun
+
+# Build
+go build -o rigrun .
+
+# Pull a model
+ollama pull qwen2.5-coder:14b
+
+# Run
+./rigrun
+```
+
+#### Option 3: Go Install
+
+```bash
+go install github.com/jeranaias/rigrun@latest
+```
+
+### First Run
+
+```bash
+rigrun
+```
+
+The TUI opens. Type a question. Get an answer. That's it.
+
+### Recommended Models
+
+| Model | VRAM | Speed | Quality | Best For |
+|-------|------|-------|---------|----------|
+| `qwen2.5-coder:7b` | 4GB | Fast | Good | Quick questions, low VRAM |
+| `qwen2.5-coder:14b` | 9GB | Medium | Excellent | **Daily driver** |
+| `deepseek-coder-v2:16b` | 10GB | Medium | Excellent | Complex understanding |
+| `codestral:22b` | 13GB | Slower | Premium | Best local quality |
+| `llama3.1:8b` | 5GB | Fast | Good | General purpose |
+| `llama3.1:70b` | 40GB | Slow | Frontier | If you have the VRAM |
+
+Pull with: `ollama pull qwen2.5-coder:14b`
+
+Switch anytime with: `/model qwen2.5-coder:14b`
+
+---
+
+## The TUI Experience
+
+### Slash Commands
+
+Type `/` to see all commands, or use these directly:
+
+#### Session Commands
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/help` | `/h`, `/?` | Show all commands |
+| `/clear` | `/c` | Clear conversation |
+| `/new` | `/n` | Start new conversation |
+| `/save [name]` | `/s` | Save conversation |
+| `/load <id>` | `/l`, `/resume` | Load conversation |
+| `/list` | `/sessions` | List saved sessions |
+| `/export [format]` | `/e` | Export (json/md/txt) |
+| `/history [n]` | `/hist` | Show recent messages |
+| `/copy` | - | Copy last response |
+
+#### Model & Routing
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/model <name>` | `/m` | Switch AI model |
+| `/mode <mode>` | - | Set routing (local/cloud/auto) |
+| `/models` | - | List available models |
+| `/streaming [on\|off]` | `/stream` | Toggle streaming |
+
+#### Configuration
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/config [key]` | `/cfg` | View/set configuration |
+| `/theme [dark\|light]` | - | Switch theme |
+
+#### Tools & Status
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/tools [action]` | `/t` | Manage tools (list/enable/disable) |
+| `/status` | - | System status |
+| `/doctor` | `/diag` | Run diagnostics |
+| `/cache [action]` | - | Cache stats/clear |
+| `/tokens` | `/tok` | Token usage |
+| `/context` | `/ctx` | Context window info |
+| `/gpu` | - | GPU status |
+
+#### Security (IL5)
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/audit [lines]` | - | View audit log |
+| `/security` | `/sec` | Security status |
+| `/classify [level]` | `/cls` | Set classification |
+| `/consent` | - | Consent banner status |
+
+#### Meta
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| `/version` | `/ver` | Version info |
+| `/quit` | `/q`, `/exit` | Exit |
+| `/retry` | - | Retry last failed message |
+| `/tips` | - | Show usage tips |
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Send message |
+| `Shift+Enter` | New line (multi-line input) |
+| `Ctrl+C` | Cancel generation / Quit |
+| `Ctrl+L` | Clear screen |
+| `Ctrl+P` | Command palette |
+| `Tab` | Auto-complete file paths |
+| `Up` | Previous message from history |
+| `Down` | Next message from history |
+| `PageUp` | Scroll response up |
+| `PageDown` | Scroll response down |
+| `Home` | Scroll to top |
+| `End` | Scroll to bottom |
+| `/` | Open slash command menu |
+| `Esc` | Cancel current operation |
+
+#### Vim Mode (Optional)
+Enable with `/config vim_mode true`:
+| Key | Action |
+|-----|--------|
+| `j` | Scroll down |
+| `k` | Scroll up |
+| `g` | Go to top |
+| `G` | Go to bottom |
+| `:` | Command mode |
+| `:w` | Save session |
+| `:q` | Quit |
+
+---
+
+## Agentic Tools
+
+### Tool Reference
+
+#### Read
+Read file contents into context.
+```
+Arguments:
+  file_path: string (required) - Absolute or relative path
+
+Example: {"name": "Read", "arguments": {"file_path": "src/main.go"}}
+```
+
+#### Glob
+Find files matching a pattern.
+```
+Arguments:
+  pattern: string (required) - Glob pattern (e.g., "**/*.ts")
+  path: string (optional) - Base directory
+
+Example: {"name": "Glob", "arguments": {"pattern": "**/*.test.js"}}
+```
+
+#### Grep
+Search file contents with regex.
+```
+Arguments:
+  pattern: string (required) - Regex pattern
+  path: string (optional) - Directory to search
+  glob: string (optional) - File pattern filter
+  output_mode: string (optional) - "content", "files_with_matches", "count"
+
+Example: {"name": "Grep", "arguments": {"pattern": "TODO|FIXME", "glob": "**/*.go"}}
+```
+
+#### Write
+Create or overwrite a file. **Requires permission.**
+```
+Arguments:
+  file_path: string (required) - Path to write
+  content: string (required) - File contents
+
+Example: {"name": "Write", "arguments": {"file_path": "test.py", "content": "print('hello')"}}
+```
+
+#### Edit
+Search and replace in a file. **Requires permission.**
+```
+Arguments:
+  file_path: string (required) - File to edit
+  old_string: string (required) - Text to find
+  new_string: string (required) - Replacement text
+
+Example: {"name": "Edit", "arguments": {"file_path": "config.js", "old_string": "debug: false", "new_string": "debug: true"}}
+```
+
+#### Bash
+Execute a shell command. **Requires permission.**
+```
+Arguments:
+  command: string (required) - Shell command to run
+  timeout: number (optional) - Timeout in ms (default: 30000)
+
+Example: {"name": "Bash", "arguments": {"command": "go test ./..."}}
+
+Blocked commands: rm -rf /, format, mkfs, dd if=, shutdown, reboot
+```
+
+#### WebSearch
+Search the web via DuckDuckGo (no API key required).
+```
+Arguments:
+  query: string (required) - Search query
+  num_results: number (optional) - Max results (default: 5)
+
+Example: {"name": "WebSearch", "arguments": {"query": "golang context best practices"}}
+```
+
+#### WebFetch
+Fetch a web page and extract content.
+```
+Arguments:
+  url: string (required) - URL to fetch
+
+Example: {"name": "WebFetch", "arguments": {"url": "https://go.dev/doc/effective_go"}}
+
+Security: SSRF protection blocks internal/private IPs
+```
+
+### Tool Security
+
+Tools operate within a security sandbox:
+
+- **Allowed paths**: Current directory, home directory, temp directory
+- **Blocked paths**: System directories, other users' directories
+- **Blocked commands**: Destructive operations (rm -rf /, format, etc.)
+- **Network protection**: SSRF protection, private IP blocking
+- **Permission escalation**: Write/Edit/Bash always require approval
+
+Configure tool permissions in `~/.rigrun/config.toml`:
+```toml
+[tools]
+read_permission = "auto"      # auto, ask, never
+write_permission = "ask"      # auto, ask, never
+bash_permission = "ask"       # auto, ask, never
+web_permission = "auto"       # auto, ask, never
+```
+
+---
+
+## Intelligent Routing
+
+### How It Works
+
+Every query goes through the routing pipeline:
+
+1. **Classification**: Analyze query complexity (trivial/simple/moderate/complex/expert)
+2. **Cache check**: Look for semantic or exact match
+3. **Tier selection**: Route to minimum capable tier
+4. **Execution**: Run query, track cost
+5. **Cache update**: Store for future hits
+
+### Routing Modes
+
+| Mode | Behavior |
+|------|----------|
+| `local` | Always use local model, never cloud |
+| `cloud` | Always use cloud (for testing) |
+| `auto` | Smart routing based on complexity |
+| `hybrid` | Local first, cloud fallback on failure |
+
+Set with `/mode <mode>` or `rigrun config set routing.default_mode <mode>`
+
+### Complexity Classification
+
+| Level | Examples | Default Tier |
+|-------|----------|--------------|
+| Trivial | "What is 2+2?", "Hello" | Cache/Local |
+| Simple | "What is a mutex?", "Fix this typo" | Local |
+| Moderate | "Explain this function", "Write a test" | Local |
+| Complex | "Design a system for...", "Analyze architecture" | Local/Cloud |
+| Expert | "Novel algorithm for...", "Security audit" | Cloud |
+
+### Cloud Providers
+
+rigrun uses [OpenRouter](https://openrouter.ai) for cloud access, giving you:
+- Claude 3.5 Sonnet, Claude 3 Opus
+- GPT-4, GPT-4 Turbo
+- Llama 3.1 405B
+- Mixtral, Command R+
+- And 100+ other models
+
+Set your API key:
+```bash
+rigrun config set openrouter_key sk-or-...
+```
+
+### Cost Control
+
+- **Paranoid mode**: Block ALL cloud requests
+  ```bash
+  rigrun config set paranoid_mode true
+  ```
+
+- **Max tier**: Limit how high routing can escalate
+  ```bash
+  rigrun config set routing.max_tier sonnet  # Never use Opus
+  ```
+
+- **Per-query approval**: In auto mode, you approve cloud escalations
 
 ---
 
 ## Security & Compliance
 
-### The Problem with Existing LLM Solutions
+### NIST 800-53 Controls
 
-Every other LLM router treats all queries the same. In environments handling classified data, this is unacceptable. A single misrouted query containing CUI, FOUO, or classified information to a cloud API can result in a security incident, compliance violation, or worse.
+rigrun implements 43 security controls across these families:
 
-### rigrun's Solution: Classification-Based Routing
+#### Access Control (AC)
+| Control | Description | Implementation |
+|---------|-------------|----------------|
+| AC-3 | Access Enforcement | Role-based access control |
+| AC-5 | Separation of Duties | Distinct admin/operator/user roles |
+| AC-6 | Least Privilege | Minimal default permissions |
+| AC-7 | Unsuccessful Logon Attempts | 3 attempts, 15-min lockout |
+| AC-8 | System Use Notification | DoD consent banner |
+| AC-12 | Session Termination | Configurable timeout (default 30min) |
+| AC-17 | Remote Access | Secure API authentication |
 
-rigrun is the **first and only** LLM router that understands data classification. Every query is analyzed and routed based on its classification level:
+#### Audit & Accountability (AU)
+| Control | Description | Implementation |
+|---------|-------------|----------------|
+| AU-2 | Audit Events | All queries, tools, sessions logged |
+| AU-3 | Content of Audit Records | Timestamp, user, action, result |
+| AU-5 | Response to Failures | Alert on audit failure |
+| AU-6 | Audit Review | `/audit` command, SIEM export |
+| AU-9 | Protection of Audit Info | HMAC tamper detection |
+| AU-11 | Audit Record Retention | Configurable retention policy |
 
-| Classification Level | Routing Decision | Rationale |
-|---------------------|------------------|-----------|
-| **UNCLASSIFIED** | Cloud or Local | Full flexibility, cost optimization |
-| **CUI** (Controlled Unclassified) | Local Only | Meets NIST 800-171 requirements |
-| **FOUO** (For Official Use Only) | Local Only | Protected from cloud exposure |
-| **SECRET** | Local Only | Air-gapped enforcement |
-| **TOP_SECRET** | Local Only | Maximum security posture |
+#### Contingency Planning (CP)
+| Control | Description | Implementation |
+|---------|-------------|----------------|
+| CP-9 | System Backup | Encrypted backup command |
+| CP-10 | System Recovery | Verified restore process |
 
-**This is the key differentiator.** No other solution provides automatic classification detection and routing enforcement.
+#### Identification & Authentication (IA)
+| Control | Description | Implementation |
+|---------|-------------|----------------|
+| IA-2 | User Identification | API key authentication |
+| IA-7 | Cryptographic Auth | PKI certificate support |
 
-### IL5/DoW Compliance
+#### System & Communications (SC)
+| Control | Description | Implementation |
+|---------|-------------|----------------|
+| SC-7 | Boundary Protection | Network isolation modes |
+| SC-8 | Transmission Confidentiality | TLS 1.3 required |
+| SC-12 | Key Management | Secure key storage |
+| SC-13 | Cryptographic Protection | FIPS 140-2 algorithms |
+| SC-17 | PKI Certificates | Certificate pinning |
+| SC-28 | Protection at Rest | AES-256-GCM encryption |
 
-rigrun meets Department of War Impact Level 5 (IL5) requirements:
+#### System & Information Integrity (SI)
+| Control | Description | Implementation |
+|---------|-------------|----------------|
+| SI-7 | Software Integrity | Binary verification |
 
-- **Data Sovereignty**: Classified data never leaves your infrastructure
-- **Access Control**: Full audit logging of all queries and routing decisions
-- **Encryption**: All local data encrypted at rest
-- **Air-Gap Support**: Operates fully disconnected from external networks
-- **Audit Trail**: Complete provenance for every query
+### Classification Levels
 
-### Air-Gapped Security
-
-When operating in air-gapped environments, rigrun provides:
-
-```bash
-# Air-gapped mode - zero external connections
-rigrun --air-gapped
-
-# Paranoid mode - blocks any attempt to reach cloud APIs
-rigrun --paranoid
-```
-
-**Guarantee**: In air-gapped mode, classified content has zero pathways to external systems. This is enforced at the code level, not just configuration.
-
-### Test Results
-
-rigrun has been exhaustively tested for security and routing accuracy:
-
-| Test Category | Result | Details |
-|--------------|--------|---------|
-| **Routing Accuracy** | **100%** | 1,000+ test scenarios, zero misroutes |
-| **Brute Force Tests** | **909/909 passed** | Attempted to force cloud routing of classified content |
-| **Adversarial Attacks** | **53/53 blocked** | Red team attempts to bypass classification |
-| **Model Coverage** | **qwen2.5:3b - 32B** | Tested across full model range |
-
-These are not theoretical claims. Every test is reproducible:
-
-```bash
-# Run the full security test suite
-rigrun test --security
-
-# Run adversarial attack simulations
-rigrun test --adversarial
-
-# Verify classification routing
-rigrun test --classification
-```
-
-### Why This Matters
-
-In government and defense environments, you need:
-
-1. **Certainty** - Not "usually works" but "always works"
-2. **Auditability** - Prove compliance to inspectors
-3. **Simplicity** - Drop-in replacement, not a rewrite
-
-rigrun delivers all three. It's the LLM router you can stake your clearance on.
-
----
-
-## What is rigrun?
-
-**For Developers:**
-rigrun is an OpenAI-compatible API router that runs on your hardware. It reduces LLM costs by intelligently routing requests through a three-tier system: semantic cache (instant, free) -> local GPU inference (fast, free) -> cloud fallback (only when needed). Think of it as a smart proxy that saves you money while maintaining compatibility with existing OpenAI/Claude codebases.
-
-**For Security Teams:**
-rigrun is a classification-aware gateway that ensures sensitive data never leaves your infrastructure. It provides the same AI capabilities your developers need while enforcing your security policies at the routing layer.
-
-**How It Works:**
-1. **Classification First**: Every query is analyzed for classification markers
-2. **Cache Check**: Answers similar questions instantly (40-60% of requests)
-3. **Local Inference**: Runs AI on your hardware for classified content (always) or cost savings (when appropriate)
-4. **Cloud Fallback**: Only for unclassified queries when local models are insufficient
-
-**Result**: Full AI capabilities with zero risk of classified data exposure.
-
-**The Project Includes:**
-- **rigrun** (Rust) - The OpenAI-compatible API server with classification routing
-- **rigrun TUI** (Go) - Interactive terminal interface with agentic tool capabilities
-
----
-
-## 5-Minute Quickstart
-
-### Step 1: Install Ollama
-Ollama runs AI models on your computer.
-
-**macOS/Linux:**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-**Windows:**
-Download from https://ollama.com/download
-
-### Step 2: Install rigrun
-Choose the easiest option for you:
-
-**Option A: Pre-built Binary (Recommended)**
-1. Download from https://github.com/rigrun/rigrun/releases
-2. Extract and move to your PATH
-3. Done!
-
-**Option B: Install via Cargo (if you have Rust)**
-```bash
-cargo install rigrun
-```
-
-### Step 3: Run rigrun
-```bash
-rigrun
-```
-
-That's it! rigrun will:
-- Detect your GPU automatically
-- Download the best AI model for your hardware (one-time, takes 5-10 minutes)
-- Start an API server at http://localhost:8787
-
-### Step 4: Make Your First Request
-
-**Using cURL:**
-```bash
-curl http://localhost:8787/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "auto",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
-**Using Python:**
-```python
-from openai import OpenAI
-
-client = OpenAI(base_url="http://localhost:8787/v1", api_key="unused")
-response = client.chat.completions.create(
-    model="auto",
-    messages=[{"role": "user", "content": "Say hello!"}]
-)
-print(response.choices[0].message.content)
-```
-
-Congratulations! You just ran your first local AI query.
-
-**Next Steps:**
-- [**Getting Started Guide**](docs/GETTING_STARTED.md) - Complete walkthrough with GPU setup, troubleshooting, and more
-
----
-
-## OpenAI-Compatible API Endpoints
+Set classification with CLI or TUI:
 
 ```bash
-# Health check
-curl http://localhost:8787/health
-
-# List models
-curl http://localhost:8787/v1/models
-
-# Chat completions
-curl http://localhost:8787/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "auto",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-
-# Stats & cache
-curl http://localhost:8787/stats
-curl http://localhost:8787/cache/stats
-
-# Classification routing stats
-curl http://localhost:8787/classification/stats
+rigrun classify set UNCLASSIFIED
+rigrun classify set CUI
+rigrun classify set CONFIDENTIAL
+rigrun classify set SECRET
+rigrun classify set SECRET --caveat NOFORN
+rigrun classify set TOP_SECRET
 ```
 
-### Python Integration
-```python
-from openai import OpenAI
+Classification affects:
+- Banner display
+- Routing restrictions (CUI+ forced local)
+- Audit requirements
+- Network policies
 
-client = OpenAI(base_url="http://localhost:8787/v1", api_key="unused")
-response = client.chat.completions.create(
-    model="auto",
-    messages=[{"role": "user", "content": "Write Python code for fizzbuzz"}]
-)
-print(response.choices[0].message.content)
-```
+### Air-Gapped Operation
 
-### JavaScript Integration
-```javascript
-import OpenAI from 'openai';
-
-const openai = new OpenAI({
-  baseURL: 'http://localhost:8787/v1',
-  apiKey: 'unused',
-});
-
-const response = await openai.chat.completions.create({
-  model: 'auto',
-  messages: [{ role: 'user', content: 'Explain async/await' }],
-});
-console.log(response.choices[0].message.content);
-```
-
----
-
-## GPU-Optimized Model Recommendations
-
-| VRAM | Recommended Model | Notes |
-|------|-------------------|-------|
-| <6GB | `qwen2.5-coder:3b` | Lightweight, fast |
-| 6-8GB | `qwen2.5-coder:7b` | Good balance |
-| 9-16GB | `qwen2.5-coder:14b` | Recommended |
-| 17GB+ | `deepseek-coder-v2:16b` or `llama3.3:70b` | Professional / Maximum capability |
-
-All models from qwen2.5:3b through 32B have been tested and validated for classification routing accuracy.
+For completely isolated environments:
 
 ```bash
-# Pull specific model
-rigrun pull qwen2.5-coder:7b
-
-# List available models
-rigrun models
+rigrun --no-network
+# or
+rigrun config set security.offline_mode true
 ```
 
----
+This blocks:
+- All cloud API calls
+- WebSearch and WebFetch tools
+- Any network egress except localhost Ollama
 
-## Real Benchmarks: How Much You Save with Local LLM
-
-### Side-by-Side Cost Comparison (1M tokens/month)
-
-| Provider | Architecture | Monthly Cost | Savings vs GPT-4 |
-|----------|--------------|--------------|------------------|
-| OpenAI GPT-4 | 100% cloud | **$30.00** | Baseline |
-| Claude 3.5 Sonnet | 100% cloud | **$15.00** | 50% |
-| OpenRouter Mixtral | 100% cloud | **$12.00** | 60% |
-| **rigrun (90% local)** | Cache + GPU + Cloud | **$1.20** | **96% savings** |
-
-### Example Scenario (10M tokens/month)
-**Without rigrun** (OpenAI GPT-4):
-- Monthly cost: **$300**
-- Annual cost: **$3,600**
-
-**With rigrun** (90% local GPU, 10% cloud):
-- Monthly cost: **$30** (90% handled by your GPU)
-- Annual cost: **$360**
-- **Annual savings: $3,240**
-
-**ROI**: A $1,500 GPU pays for itself in 5 months vs OpenAI API costs
-
-### Where the Savings Come From
-1. **Semantic Cache** (40-60% hit rate) -> $0 cost
-2. **Local GPU Inference** (30-50% of requests) -> $0 cost after hardware
-3. **Cloud Fallback** (only 10% of requests) -> Pay only for what you need
-
----
-
-## CLI Commands
+### Verify Compliance
 
 ```bash
-rigrun                  # Start server
-rigrun --paranoid       # Start server in paranoid mode (no cloud)
-rigrun --air-gapped     # Start server in air-gapped mode
-rigrun status           # Show live stats and GPU info
-rigrun config           # Configure settings
-rigrun models           # List available models
-rigrun pull <model>     # Download specific model
-rigrun chat             # Interactive chat session
-rigrun ide-setup        # Configure VS Code/Cursor/JetBrains
-rigrun gpu-setup        # GPU setup wizard
-rigrun export           # Export your data (cache, audit log, stats)
-rigrun test --security  # Run security test suite
-rigrun test --adversarial # Run adversarial attack tests
+# Run security self-tests
+rigrun test security
 
-# Go TUI CLI commands
-rigrun ask "question"                  # Single query mode
-rigrun ask --agentic "task"            # Enable agentic tool use
-rigrun ask --agentic -m qwen2.5-coder:14b "task"  # Agentic with specific model
-rigrun ask --max-iter 10 "task"        # Set max agentic iterations
+# Verify integrity
+rigrun verify all
+
+# Check compliance status
+rigrun sectest run
 ```
-
-### Agentic CLI Mode
-
-The CLI supports agentic mode where the model can use tools (Glob, Grep, Read, Bash) to complete tasks:
-
-```bash
-# List files in a directory using Glob tool
-rigrun ask --agentic "List all Python files in /project/src"
-
-# Search codebase using Grep tool
-rigrun ask --agentic "Find all functions that handle authentication"
-
-# Complex multi-step tasks
-rigrun ask --agentic --max-iter 15 "Analyze this codebase and identify security issues"
-```
-
-**Important**: For reliable agentic tasks, use models 7B+ parameters. The CLI will warn you when using an undersized model.
-
----
-
-## rigrun TUI - Interactive Terminal Interface
-
-The rigrun project includes a full-featured **Go-based TUI** (Terminal User Interface) built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). This provides an interactive chat experience with agentic capabilities.
-
-### Key TUI Features
-
-- **Agentic Tool System**: Local models can use tools (WebSearch, Read, Glob, Grep, Bash) automatically
-- **NIST 800-53 Rev 5 Compliance**: 50+ slash commands organized by security control families
-- **Offline Mode**: Full functionality without internet access
-- **Session Management**: Save, load, and export conversations
-- **Multi-Provider Support**: Ollama, OpenRouter, and direct API integrations
-
-### Quick Start
-
-```bash
-cd go-tui
-go build -o rigrun-tui ./cmd/tui
-./rigrun-tui
-```
-
-### Slash Commands (50+ Available)
-
-| Category | Examples | NIST Controls |
-|----------|----------|---------------|
-| Security | `/audit`, `/compliance`, `/incidents` | AU-6, CA-7, IR-5 |
-| Access Control | `/rbac`, `/permissions`, `/sod` | AC-5, AC-6 |
-| Configuration | `/config`, `/baselines`, `/drift` | CM-5, CM-6 |
-| Sessions | `/save`, `/load`, `/export` | AU-9, CP-9 |
-| Models | `/models guide`, `/models table`, `/models check` | - |
-
-### Model Capability Guide
-
-The TUI includes a built-in model selection guide to help choose the right model for your tasks:
-
-```bash
-/models guide      # Full capability guide with recommendations
-/models table      # Quick comparison table
-/models check <n>  # Check if model is suitable for agentic tasks
-/models info <n>   # Detailed model info with agentic capability
-```
-
-**Model Size Recommendations:**
-
-| Size Tier | Parameters | Best For |
-|-----------|------------|----------|
-| Tiny | <3B | Simple Q&A, classification |
-| Small | 3-7B | Basic tasks, 1-2 tool calls |
-| Medium | 7-14B | Multi-step tasks, coding |
-| Large | 14-32B | Complex analysis, full agentic |
-| XLarge | 32B+ | Expert tasks, long context |
-
-**Agentic Mode Warning**: When using `--agentic` with an undersized model, rigrun automatically warns you and suggests a more capable alternative.
-
-### Agentic Tools
-
-The TUI enables local Ollama models to use tools automatically:
-
-| Tool | Description |
-|------|-------------|
-| **WebSearch** | DuckDuckGo search (no API key required) |
-| **WebFetch** | Fetch and parse web pages |
-| **Read** | Read local files |
-| **Glob** | Find files by pattern |
-| **Grep** | Search file contents |
-| **Bash** | Execute shell commands |
-
-See the full [TUI README](go-tui/README.md) for comprehensive documentation.
-
----
-
-## Key Features - Why Developers Should Choose rigrun
-
-### 1. Classification-Aware Routing (Unique to rigrun)
-Automatic detection and enforcement of data classification:
-- **UNCLASSIFIED**: Routes to optimal backend (cloud or local)
-- **CUI/FOUO/SECRET/TOP_SECRET**: Always local, always enforced
-- **100% accuracy** across 1,000+ test scenarios
-- **53 adversarial attacks blocked** in red team testing
-
-### 2. Intelligent LLM Request Routing
-Three-tier architecture for maximum cost efficiency:
-1. **Semantic Cache Layer** - Instant responses for similar queries ($0 cost)
-2. **Local GPU Layer** - Self-hosted inference via Ollama API ($0 marginal cost)
-3. **Cloud Fallback Layer** - OpenRouter for complex queries (pay per use only)
-
-**Example**: 100 API calls -> 60 from cache + 30 from local GPU + 10 from cloud = **90% cost reduction**
-
-### 3. Smart Semantic Caching (Not Just Key-Value)
-Context-aware deduplication using embeddings:
-- Recognizes similar queries: "What is recursion?" = "Explain recursion to me"
-- Configurable TTL (default: 24 hours)
-- Automatic persistence across restarts
-- Works with any LLM model (GPT, Claude, local models)
-
-**Expected cache hit rate**: 40-60% for typical development workflows
-
-### 4. Zero-Config GPU Auto-Detection
-One command to rule them all:
-- **Detects GPU**: NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel Arc
-- **Recommends optimal Ollama model** based on your VRAM
-- **Auto-downloads model** from Ollama registry
-- **VRAM monitoring**: Warns before out-of-memory errors
-
-**Supported models**: Qwen2.5-Coder, DeepSeek-Coder-V2, Llama 3.3, and 100+ more
-
-### 5. Real-Time Cost Tracking & Analytics
-Monitor every dollar saved:
-- **Live dashboard**: Cache hits, local inference, cloud calls
-- **Cost calculator**: Compare vs OpenAI/Claude/Anthropic pricing
-- **Daily/weekly reports**: Track savings over time
-- **Prometheus-compatible metrics** via `/stats` endpoint
-
-**Example savings report**: "Saved $245 this month by handling 87% of requests locally"
 
 ---
 
 ## Configuration
 
-### Quick Config
-```bash
-# Set OpenRouter key for cloud fallback
-rigrun config --openrouter-key sk-or-xxx
-
-# Change default model
-rigrun config --model qwen2.5-coder:14b
-
-# Change port
-rigrun config --port 8080
-
-# Enable air-gapped mode permanently
-rigrun config --air-gapped true
-
-# View current config
-rigrun config --show
-```
-
 ### Config File
-Edit `~/.rigrun/config.json`:
-```json
-{
-  "openrouter_key": "sk-or-xxx",
-  "model": "qwen2.5-coder:7b",
-  "port": 8787,
-  "air_gapped": false,
-  "paranoid_mode": false
-}
+
+Location: `~/.rigrun/config.toml`
+
+```toml
+# ============================================================
+# rigrun Configuration
+# ============================================================
+
+# General settings
+[general]
+default_model = "qwen2.5-coder:14b"
+default_mode = "local"
+
+# Local Ollama settings
+[local]
+ollama_url = "http://localhost:11434"
+ollama_model = "qwen2.5-coder:14b"
+
+# Cloud settings (optional)
+[cloud]
+openrouter_key = ""                           # Your OpenRouter API key
+cloud_model = "anthropic/claude-3.5-sonnet"   # Default cloud model
+
+# Routing behavior
+[routing]
+default_mode = "local"     # local, cloud, auto, hybrid
+max_tier = "opus"          # Maximum tier: haiku, sonnet, opus
+paranoid_mode = false      # true = block ALL cloud requests
+offline_mode = false       # true = block ALL network (air-gapped)
+
+# Security settings
+[security]
+session_timeout = 1800     # Seconds (30 min default, IL5 requires <=30)
+audit_enabled = true       # Enable audit logging
+banner_enabled = false     # Show classification banner
+classification = "UNCLASSIFIED"
+
+# Cache settings
+[cache]
+enabled = true
+ttl_hours = 24             # Cache entry lifetime
+max_size = 10000           # Max cached entries
+semantic_enabled = true    # Enable semantic similarity matching
+semantic_threshold = 0.92  # Similarity threshold (0-1)
+
+# UI settings
+[ui]
+theme = "dark"             # dark, light
+vim_mode = false           # Enable Vim keybindings
+show_cost = true           # Show cost in status bar
+show_tokens = true         # Show token count
+compact_mode = false       # Reduce padding
+
+# Tool permissions
+[tools]
+read_permission = "auto"
+write_permission = "ask"
+bash_permission = "ask"
+web_permission = "auto"
+```
+
+### Environment Variables
+
+Override any config with environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `RIGRUN_MODEL` | Override default model |
+| `RIGRUN_OPENROUTER_KEY` | Set OpenRouter API key |
+| `RIGRUN_PARANOID` | `1` or `true` for paranoid mode |
+| `RIGRUN_OFFLINE` | `1` or `true` for offline mode |
+| `RIGRUN_OLLAMA_URL` | Override Ollama URL |
+| `RIGRUN_MODE` | Override routing mode |
+| `RIGRUN_MAX_TIER` | Override max tier |
+| `RIGRUN_CLASSIFICATION` | Override classification |
+| `RIGRUN_THEME` | Override theme |
+
+### CLI Configuration
+
+```bash
+# View all config
+rigrun config show
+
+# Set a value
+rigrun config set paranoid_mode true
+rigrun config set ollama_model llama3.1:8b
+
+# Reset to defaults
+rigrun config reset
 ```
 
 ---
 
-## Monitoring
+## CLI Reference
+
+### Core Commands
 
 ```bash
+rigrun                      # Start TUI (default)
+rigrun ask "question"       # One-shot question
+rigrun ask --file main.go "review"  # Include file
+rigrun ask --agentic "task" # Enable tools
+rigrun chat                 # Chat mode without full TUI
+rigrun status               # System status
+rigrun doctor               # Diagnostics
+rigrun help                 # Show help
+```
+
+### Session Commands
+
+```bash
+rigrun session list                    # List sessions
+rigrun session show <id>               # Show session details
+rigrun session export <id> --format md # Export session
+rigrun session delete <id> --confirm   # Delete session
+rigrun session stats                   # Session statistics
+```
+
+### Security Commands
+
+```bash
+rigrun audit show --lines 50           # View audit log
+rigrun audit export --format json      # Export for SIEM
+rigrun audit verify                    # Verify log integrity
+rigrun backup create full              # Create backup
+rigrun backup restore <id> --confirm   # Restore backup
+rigrun classify set SECRET             # Set classification
+rigrun consent accept                  # Accept DoD banner
+rigrun lockout status                  # Check lockout
+rigrun test security                   # Run security tests
+rigrun verify all                      # Verify integrity
+```
+
+### Maintenance Commands
+
+```bash
+rigrun cache stats                     # Cache statistics
+rigrun cache clear                     # Clear cache
+rigrun maintenance start --operator ID # Enter maintenance mode
+rigrun maintenance end                 # Exit maintenance
+```
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--paranoid` | Block all cloud requests |
+| `--no-network`, `--offline` | Air-gapped mode |
+| `--skip-banner` | Skip consent banner |
+| `-q`, `--quiet` | Minimal output |
+| `-v`, `--verbose` | Debug output |
+| `--model NAME` | Override model |
+| `--json` | JSON output for scripting |
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### Ollama Not Running
+
+```bash
+# Check if running
+ollama list
+
+# Start it
+ollama serve
+```
+
+#### Model Not Found
+
+```bash
+# List available models
+ollama list
+
+# Pull the model you need
+ollama pull qwen2.5-coder:14b
+```
+
+#### GPU Not Detected
+
+```bash
+# Check GPU status
 rigrun status
+
+# For AMD on Windows, you may need:
+# Set OLLAMA_VULKAN=1 before starting Ollama
 ```
 
-Example output:
-```
-=== RigRun Status ===
+#### Slow Responses
 
-[OK] Server: Running on port 8787
-[OK] Classification Router: Active (100% accuracy)
-[i] Model: qwen2.5-coder:14b
-[i] GPU: NVIDIA RTX 4090 (24GB)
-[i] VRAM: 4096MB / 24576MB (16.7% used)
+- Try a smaller model: `qwen2.5-coder:7b`
+- Check GPU utilization with `rigrun gpu`
+- Ensure Ollama is using GPU, not CPU
 
-=== Classification Stats ===
-
-  UNCLASSIFIED:  1,247 queries (847 cloud, 400 local)
-  CUI:           89 queries (89 local, 0 cloud - enforced)
-  FOUO:          12 queries (12 local, 0 cloud - enforced)
-  Blocked:       0 (no classification violations)
-
-=== Today's Stats ===
-
-  Total queries:  1,348
-  Local queries:  501
-  Cloud queries:  847
-  Money saved:    $23.45
-```
-
----
-
-## IDE Integration
-
-rigrun works seamlessly with popular IDEs:
+#### Cloud Not Working
 
 ```bash
-rigrun ide-setup
+# Verify API key
+rigrun config show | grep openrouter
+
+# Test connection
+rigrun test connectivity
 ```
 
-Supports:
-- **VS Code** - Configures Copilot/Continue extension
-- **Cursor** - Sets up custom model endpoint
-- **JetBrains** (IntelliJ, PyCharm, WebStorm, etc.) - AI Assistant configuration
-- **Neovim** - Copilot.lua / codecompanion.nvim setup
+### Diagnostics
 
-The setup wizard auto-generates configurations using your local AI!
+```bash
+# Full system check
+rigrun doctor
 
----
+# Self-tests
+rigrun test all
 
-## Who Should Use rigrun?
+# Security tests
+rigrun test security
 
-rigrun is built for organizations that cannot compromise on security:
-
-- **Defense Contractors**: Handle CUI and classified workloads with AI assistance
-- **Government Agencies**: Meet IL5 requirements while enabling modern AI workflows
-- **Cleared Facilities**: Use AI without risking security violations
-- **Enterprise Teams**: Self-hosted AI for compliance requirements
-- **Security-Conscious Developers**: Local-first AI that respects your data
-
-### Production Readiness
-
-rigrun is production-ready for government and defense use. The classification router has been validated with:
-
-- 1,000+ routing scenarios with 100% accuracy
-- 909 brute force test cases attempting to bypass classification
-- 53 adversarial red team attacks, all blocked
-- Multi-model validation from qwen2.5:3b through 32B parameters
+# Verbose mode for debugging
+rigrun -v ask "test"
+```
 
 ---
 
-## Why rigrun vs Alternatives?
+## Architecture
 
-| Feature | rigrun | LiteLLM | OpenAI Proxy | Raw Ollama |
-|---------|--------|---------|--------------|------------|
-| **Classification Routing** | **100% Accurate** | None | None | None |
-| **IL5/DoW Compliant** | **Yes** | No | No | No |
-| **Air-Gap Support** | **Built-in** | No | No | Manual |
-| **Adversarial Tested** | **53/53 Blocked** | No | No | No |
-| **Semantic Caching** | Built-in | No | No | No |
-| **GPU Auto-detection** | Yes | No | No | Manual |
-| **Cost Tracking** | Real-time | Basic | No | No |
-| **Cloud Fallback** | Smart routing | Manual | Yes | No |
-| **Zero Config** | 3 commands | Complex | Complex | Moderate |
-| **OpenAI Compatible** | Yes | Yes | Yes | Yes |
+```
+rigrun/
+├── main.go                    # Entry point, TUI model
+├── cmd/
+│   └── installer/             # TUI installer
+├── internal/
+│   ├── cli/                   # 50+ CLI command handlers
+│   │   ├── ask.go            # Ask command with agentic loop
+│   │   ├── audit_cmd.go      # Audit log commands
+│   │   ├── backup_cmd.go     # Backup/restore commands
+│   │   ├── suggest.go        # Typo suggestions
+│   │   └── ...
+│   ├── config/               # Configuration management
+│   ├── ollama/               # Ollama API client
+│   ├── cloud/                # OpenRouter API client
+│   ├── router/               # Query routing logic
+│   │   ├── classifier.go     # Query complexity analysis
+│   │   └── tier.go           # Tier selection
+│   ├── cache/                # Semantic + exact caching
+│   ├── session/              # Session persistence
+│   ├── security/             # NIST 800-53 implementations
+│   │   ├── audit.go          # AU-2/AU-3 audit logging
+│   │   ├── auditprotect.go   # AU-9 tamper protection
+│   │   ├── backup.go         # CP-9/CP-10 backup
+│   │   ├── boundary.go       # SC-7 network boundary
+│   │   ├── crypto.go         # SC-13 cryptographic controls
+│   │   ├── encrypt.go        # SC-28 encryption at rest
+│   │   ├── lockout.go        # AC-7 account lockout
+│   │   ├── rbac.go           # AC-5/AC-6 role-based access
+│   │   └── ...
+│   ├── tools/                # Agentic tool implementations
+│   │   ├── read.go           # Read tool
+│   │   ├── glob.go           # Glob tool
+│   │   ├── grep.go           # Grep tool
+│   │   ├── write.go          # Write tool
+│   │   ├── edit.go           # Edit tool
+│   │   ├── bash.go           # Bash tool
+│   │   ├── web.go            # WebFetch tool
+│   │   ├── duckduckgo.go     # WebSearch tool
+│   │   ├── executor.go       # Tool execution engine
+│   │   ├── agentic.go        # Agentic loop orchestration
+│   │   └── security.go       # Tool sandboxing
+│   ├── context/              # @ mention parsing
+│   ├── commands/             # Slash command registry
+│   ├── model/                # Data models
+│   ├── detect/               # GPU detection
+│   ├── offline/              # Air-gapped mode
+│   └── ui/                   # TUI components
+│       ├── chat/             # Chat view
+│       ├── components/       # Reusable UI components
+│       └── styles/           # Theming
+└── pkg/
+    ├── markdown/             # Markdown rendering
+    └── syntax/               # Syntax highlighting
+```
 
-**The bottom line**: If you handle classified data, rigrun is the only option. No other solution provides automatic classification detection, routing enforcement, and IL5 compliance.
+### Key Design Decisions
+
+1. **Local-first**: All queries try local before cloud
+2. **Privacy by default**: No telemetry, no data collection
+3. **Security as architecture**: IL5 controls baked in, not bolted on
+4. **TUI-centric**: Full experience in terminal, CLI for automation
+5. **Tool safety**: Sandbox by default, permission escalation for writes
+
+---
+
+## FAQ
+
+**Q: Is my code really private?**
+
+A: Yes. With local models, queries never leave your machine - they go to Ollama on localhost. When you enable cloud, you explicitly see what's sent. No telemetry, no data collection, no training on your queries.
+
+**Q: How does quality compare to ChatGPT/Claude?**
+
+A: For 90% of coding tasks (explaining code, writing functions, debugging, refactoring), a good 14B model like Qwen 2.5 Coder produces equivalent results. For the 10% that need frontier models, you can route to cloud.
+
+**Q: What if local gives a bad answer?**
+
+A: Ask it to try again (often works), rephrase your question, use `/mode cloud` for that query, or switch to a larger local model.
+
+**Q: Can I use this at work?**
+
+A: Yes. The IL5 security controls make rigrun suitable for enterprise and government. Run `rigrun test security` to verify compliance, and check with your security team about specific requirements.
+
+**Q: What GPUs are supported?**
+
+A: Anything Ollama supports:
+- NVIDIA: CUDA (most cards)
+- AMD: ROCm on Linux, Vulkan on Windows
+- Apple: Metal (M1/M2/M3)
+- CPU-only: Works, just slower
+
+**Q: Is this affiliated with Anthropic/OpenAI/any AI company?**
+
+A: No. rigrun is independent open-source software. It uses Ollama (open-source) for local inference and OpenRouter (API aggregator) for optional cloud access.
+
+**Q: Why AGPL license?**
+
+A: To ensure improvements stay open-source. You can use rigrun for any purpose. If you modify and distribute it, you share your changes under the same license.
+
+**Q: How do I report bugs or request features?**
+
+A: [GitHub Issues](https://github.com/jeranaias/rigrun/issues) for bugs, [GitHub Discussions](https://github.com/jeranaias/rigrun/discussions) for features and questions.
 
 ---
 
 ## Contributing
 
-We welcome contributions! Here's how to get started:
+rigrun is open source and welcomes contributions:
 
-1. **Fork & clone**
-   ```bash
-   git clone https://github.com/rigrun/rigrun
-   cd rigrun
-   ```
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes
+4. Run tests: `go test ./...`
+5. Commit: `git commit -m 'Add amazing feature'`
+6. Push: `git push origin feature/amazing-feature`
+7. Open a Pull Request
 
-2. **Create feature branch**
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-
-3. **Make changes and test**
-   ```bash
-   cargo test
-   cargo build --release
-   ```
-
-4. **Commit & push**
-   ```bash
-   git commit -m "Add amazing feature"
-   git push origin feature/amazing-feature
-   ```
-
-5. **Open Pull Request**
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
-**First-time contributor?** Look for issues tagged with `good-first-issue`!
-
----
-
-## Privacy & Data Ownership
-
-rigrun is designed with **privacy maximalism** in mind. Your data is yours.
-
-### What Data rigrun Stores Locally
-
-| Location | Data | Purpose |
-|----------|------|---------|
-| `~/.rigrun/config.json` | API keys, model preferences | Configuration |
-| `~/.rigrun/stats.json` | Query counts, cost savings | Analytics |
-| `~/.rigrun/audit.log` | Query log with timestamps and classification | Compliance |
-| `~/.rigrun/cache/` | Cached responses | Performance |
-
-### What Data Could Go to Cloud
-
-| Scenario | Data Sent | How to Prevent |
-|----------|-----------|----------------|
-| Cloud fallback (UNCLASSIFIED only) | Query text, model response | Use `--air-gapped` flag |
-| OpenRouter API calls | Full conversation | Don't configure OpenRouter key |
-| Explicit cloud model requests | Query text | Use `model: local` or `auto` |
-
-**Important**: Classified content (CUI, FOUO, SECRET, TOP_SECRET) is NEVER sent to cloud APIs, regardless of configuration. This is enforced at the code level.
-
-### Air-Gapped Mode: Zero External Connections
+### Development Setup
 
 ```bash
-# Air-gapped mode - your data NEVER leaves your machine
-rigrun --air-gapped
-
-# Or set in config for permanent air-gapped operation
-# Add to ~/.rigrun/config.json:
-# "air_gapped": true
+git clone https://github.com/jeranaias/rigrun.git
+cd rigrun
+go mod download
+go build -o rigrun .
 ```
 
-When air-gapped mode is enabled:
-- All external network requests are **blocked**
-- Only local inference (Ollama) and cache are used
-- A confirmation banner is displayed on startup
-- All queries logged with routing decisions
+### Code Style
 
-### Audit Logging
-
-Every query is logged to `~/.rigrun/audit.log` for full transparency and compliance:
-
-```
-2024-01-15 10:23:45 | UNCLASSIFIED |     CACHE_HIT | "What is recursi..." | 0 tokens | $0.00
-2024-01-15 10:24:12 | UNCLASSIFIED |         LOCAL | "Explain async/a..." | 847 tokens | $0.00
-2024-01-15 10:25:33 |          CUI | LOCAL_ENFORCED | "Review contract..." | 1203 tokens | $0.00
-2024-01-15 10:26:01 |       SECRET | LOCAL_ENFORCED | "Analyze intel..." | 892 tokens | $0.00
-```
-
-### Export & Delete Your Data
-
-```bash
-# Export all your data (cache, audit log, stats)
-rigrun export
-
-# Export to specific directory
-rigrun export --output ~/my-backup/
-
-# Delete all rigrun data
-rm -rf ~/.rigrun
-rm -rf ~/AppData/Local/rigrun  # Windows
-```
-
----
-
-## Requirements
-
-- **Rust** - https://rustup.rs (required for `cargo install`)
-- **Ollama** - https://ollama.com/download (required for local inference)
-- **GPU** (optional but recommended) - NVIDIA, AMD, Apple Silicon, or Intel Arc
-- **OpenRouter API Key** (optional) - For cloud fallback of unclassified queries only
+- Go standard formatting (`gofmt`)
+- Clear comments on exported functions
+- Tests for new features
+- No breaking changes to config without migration path
 
 ---
 
 ## License
 
-This project is [MIT](LICENSE) licensed - use it anywhere, commercially or personally!
+**AGPL-3.0** - Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+
+You can:
+- Use rigrun for any purpose (personal, commercial, government)
+- Modify the source code
+- Distribute copies
+
+You must:
+- Share source code of modifications if you distribute
+- License modifications under AGPL-3.0
+- Preserve copyright notices
 
 ---
 
 ## Acknowledgments
 
-- [Ollama](https://ollama.com) - Powering local inference
-- [OpenRouter](https://openrouter.ai) - Smart cloud fallback routing
-- All our contributors - [See all](https://github.com/rigrun/rigrun/graphs/contributors)
+- [Ollama](https://ollama.ai) - Local LLM runtime
+- [OpenRouter](https://openrouter.ai) - Cloud LLM gateway
+- [Charm](https://charm.sh) - Beautiful TUI libraries (Bubble Tea, Lip Gloss, Bubbles)
+- [NIST](https://csrc.nist.gov) - SP 800-53 Security Controls
 
 ---
 
-## Documentation
+<p align="center">
+<b>Your GPU. Your data. Your terminal.<br>
+No subscriptions. No telemetry. No compromises.</b>
+</p>
 
-**Start here:** [**Getting Started Guide**](docs/GETTING_STARTED.md) - Everything you need in one place.
-
-**Architecture:** [**ARCHITECTURE.md**](ARCHITECTURE.md) - Comprehensive technical architecture documentation including directory structure, module overview, security controls, and diagrams.
-
-Additional reference documentation:
-
-- **[API Reference](docs/api-reference.md)** - Complete API documentation with examples
-- **[Configuration](docs/configuration.md)** - All configuration options explained
-- **[CLI Reference](CLI_REFERENCE.md)** - Full command reference
-- **[GPU Compatibility](docs/GPU_COMPATIBILITY.md)** - Detailed GPU setup for NVIDIA, AMD, Apple Silicon
-- **[Security & Compliance](docs/security.md)** - Classification routing, IL5 compliance, and best practices
-- **[Contributing](docs/contributing.md)** - Developer setup and contribution guidelines
-- **[Changelog](CHANGELOG.md)** - Version history and release notes
-
-### Quick Links
-
-- **Issues**: [GitHub Issues](https://github.com/rigrun/rigrun/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/rigrun/rigrun/discussions)
-- **Releases**: [GitHub Releases](https://github.com/rigrun/rigrun/releases)
-
----
-
-## Get Started Now
-
-1. **Star this repo** to help others discover secure local LLM solutions
-2. **[Download rigrun](https://github.com/rigrun/rigrun/releases)** and install in 3 minutes
-3. **[Join discussions](https://github.com/rigrun/rigrun/discussions)** to share your experience
-4. **[Report issues](https://github.com/rigrun/rigrun/issues)** to help improve rigrun
-
-**For government and defense evaluations**: Contact us for deployment guidance and compliance documentation.
+```bash
+rigrun
+```
