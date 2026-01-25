@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! DoD Consent Banner Module
 //!

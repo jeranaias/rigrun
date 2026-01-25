@@ -1,4 +1,7 @@
 @echo off
+REM Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+REM SPDX-License-Identifier: AGPL-3.0-or-later
+REM
 REM ask.bat - Ultra-simple rigrun query helper for Windows
 REM Usage: ask "your question here"
 

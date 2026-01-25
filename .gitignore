@@ -376,6 +376,9 @@ ask_rigrun.ps1
 # END OF .gitignore
 # ============================================================================
 
+# Archive folder for stale/unused files
+archive/
+
 # Internal planning docs (not for public repo)
 AUTHENTICATION_IMPLEMENTATION.md
 BATTLE_PLAN.md

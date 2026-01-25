@@ -1,3 +1,6 @@
+# Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
 # rigrun_agent.ps1 - An agent that uses rigrun to think and build code
 # This is rigrun building rigrun FOR REAL
 

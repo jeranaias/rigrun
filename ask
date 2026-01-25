@@ -1,4 +1,7 @@
 #!/bin/bash
+# Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
 # ask - Ultra-simple rigrun query helper
 # Usage: ./ask "your question here"
 

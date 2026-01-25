@@ -1,3 +1,6 @@
+# Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 name: Release
 
 on:
@@ -69,7 +72,7 @@ jobs:
           path: rigrun-${{ matrix.target }}.*
 
   release:
-    needs: build
+    needs: [build, build-go-tui]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -87,9 +90,96 @@ jobs:
         with:
           files: artifacts/**/*
           generate_release_notes: true
+          body: |
+            ## rigrun Release
+
+            ### Rust Server (rigrun)
+            The main rigrun server binary for LLM routing.
+
+            ### Go TUI (rigrun-tui)
+            Terminal user interface with classification-aware routing.
+
+            ### Security Notes
+            - All classified data (CUI, SECRET, TOP SECRET) is routed locally only
+            - DoD STIG IL5 compliant session management
+            - NIST 800-53 AC-4 information flow enforcement
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # =============================================================================
+  # Go TUI Build
+  # =============================================================================
+  build-go-tui:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: .exe
+          - os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ""
+          - os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ""
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+          - os: ubuntu-latest
+            goos: linux
+            goarch: arm64
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+          cache-dependency-path: go-tui/go.sum
+
+      - name: Build Go TUI
+        working-directory: go-tui
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          go build -ldflags="-s -w" -o rigrun-tui${{ matrix.ext }} ./cmd/rigrun
+
+      - name: Package (Windows)
+        if: matrix.goos == 'windows'
+        working-directory: go-tui
+        run: |
+          mkdir dist
+          cp rigrun-tui${{ matrix.ext }} dist/
+          cd dist && 7z a ../rigrun-tui-${{ matrix.goos }}-${{ matrix.goarch }}.zip *
+
+      - name: Package (Unix)
+        if: matrix.goos != 'windows'
+        working-directory: go-tui
+        run: |
+          mkdir dist
+          cp rigrun-tui${{ matrix.ext }} dist/
+          cd dist && tar -czvf ../rigrun-tui-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rigrun-tui-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: go-tui/rigrun-tui-${{ matrix.goos }}-${{ matrix.goarch }}.*
+
+  # =============================================================================
+  # Publish to crates.io
+  # =============================================================================
   publish-crates:
     needs: release
     runs-on: ubuntu-latest

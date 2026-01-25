@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! GPU Detection Module for rigrun
 //!
@@ -158,6 +158,13 @@ pub fn detect_gpu() -> Result<GpuInfo> {
     }
 
     // No GPU found, fall back to CPU mode
+    eprintln!("WARNING: No compatible GPU detected on this system.");
+    eprintln!("         Falling back to CPU-only mode. Performance will be limited.");
+    eprintln!("         Supported GPUs: NVIDIA (CUDA), AMD (ROCm), Apple Silicon (Metal), Intel Arc");
+    eprintln!("         If you have a GPU installed, ensure drivers are properly installed:");
+    eprintln!("         - NVIDIA: Install nvidia-smi (CUDA toolkit)");
+    eprintln!("         - AMD: Install rocm-smi (ROCm) on Linux, or ensure drivers are current on Windows");
+    eprintln!("         - Intel Arc: Install intel_gpu_top utilities");
     Ok(GpuInfo::default())
 }
 
@@ -223,6 +230,25 @@ fn detect_nvidia() -> Option<GpuInfo> {
         driver,
         gpu_type: GpuType::Nvidia,
     })
+}
+
+/// Sanitizes a GPU name for safe use in PowerShell commands.
+///
+/// Escapes special characters that could be used for command injection or
+/// cause parsing issues in PowerShell scripts.
+fn sanitize_for_powershell(input: &str) -> String {
+    input
+        .replace('`', "``")    // Escape backtick (PowerShell escape char)
+        .replace('$', "`$")    // Escape variable expansion
+        .replace('"', "`\"")   // Escape double quotes
+        .replace('\'', "''")   // Escape single quotes (double them in PS)
+        .replace('&', "`&")    // Escape command separator
+        .replace('|', "`|")    // Escape pipe
+        .replace(';', "`;")    // Escape command separator
+        .replace('(', "`(")    // Escape subexpression
+        .replace(')', "`)")    // Escape subexpression
+        .replace('<', "`<")    // Escape redirection
+        .replace('>', "`>")    // Escape redirection
 }
 
 /// Infers VRAM size from AMD GPU model name.
@@ -500,17 +526,26 @@ try {
         .or(registry_vram)
         .or(inferred_vram)
         .or(wmi_vram)
-        .unwrap_or(8); // Default to 8GB if all methods fail
+        .unwrap_or_else(|| {
+            eprintln!("WARNING: Failed to detect VRAM for AMD GPU '{}'. All detection methods failed.", gpu_name);
+            eprintln!("         Falling back to 8GB default. This may not match your actual VRAM.");
+            eprintln!("         Consider updating GPU drivers or reporting this issue.");
+            8
+        });
 
     // Validation: If WMI returned 4GB or less for a high-end GPU, it's likely wrong
     // WMI AdapterRAM is 32-bit, overflows to ~4095MB for GPUs >4GB
-    // Check if we have an inferred value that's higher
+    // Check if we have an inferred value that's higher, but only for cards that should have >4GB
     if vram_gb <= 4 {
         if let Some(inferred) = infer_amd_vram_from_model(&gpu_name) {
-            if inferred > vram_gb {
-                // High-end GPU detected, WMI is showing 32-bit overflow limitation
+            if inferred > 4 && inferred > vram_gb {
+                // High-end GPU detected with >4GB VRAM, WMI is showing 32-bit overflow
+                eprintln!("INFO: Detected WMI VRAM overflow for '{}'. Correcting {} GB -> {} GB based on model specs.",
+                    gpu_name, vram_gb, inferred);
                 vram_gb = inferred;
             }
+            // If inferred is also 4GB (RX 6400/6500), keep the detected value
+            // This prevents incorrectly upgrading actual 4GB cards
         }
     }
 
@@ -1054,14 +1089,38 @@ pub struct LoadedModelInfo {
 pub fn get_ollama_loaded_models() -> Vec<LoadedModelInfo> {
     let output = match Command::new("ollama").arg("ps").output() {
         Ok(out) if out.status.success() => out,
-        _ => return Vec::new(),
+        Ok(out) => {
+            eprintln!("WARNING: 'ollama ps' command failed with exit code: {:?}", out.status.code());
+            return Vec::new();
+        }
+        Err(e) => {
+            eprintln!("WARNING: Failed to execute 'ollama ps': {}. Is Ollama installed and in PATH?", e);
+            return Vec::new();
+        }
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut models = Vec::new();
+    let mut lines = stdout.lines();
 
-    // Skip header line
-    for line in stdout.lines().skip(1) {
+    // Validate header line exists and has expected format
+    let header = match lines.next() {
+        Some(h) if !h.trim().is_empty() => h,
+        _ => {
+            eprintln!("WARNING: 'ollama ps' returned empty or invalid output");
+            return Vec::new();
+        }
+    };
+
+    // Basic validation that header contains expected columns
+    let header_upper = header.to_uppercase();
+    if !header_upper.contains("NAME") || !header_upper.contains("SIZE") {
+        eprintln!("WARNING: 'ollama ps' output format may have changed. Expected 'NAME' and 'SIZE' columns.");
+        eprintln!("         Header: {}", header);
+    }
+
+    // Parse data lines
+    for (line_num, line) in lines.enumerate() {
         if line.trim().is_empty() {
             continue;
         }
@@ -1070,19 +1129,34 @@ pub fn get_ollama_loaded_models() -> Vec<LoadedModelInfo> {
         // The output is whitespace-separated but some fields may contain spaces
         let parts: Vec<&str> = line.split_whitespace().collect();
 
-        if parts.len() < 5 {
+        // Validate minimum number of fields (NAME, ID, SIZE with unit = 4 minimum)
+        if parts.len() < 4 {
+            eprintln!("WARNING: Skipping malformed line {} in 'ollama ps' output: '{}'", line_num + 2, line);
             continue;
         }
 
         let name = parts[0].to_string();
         let id = parts[1].to_string();
 
-        // Size is typically "X.X GB" - find GB/MB position
+        // Validate ID format (should be hex-like)
+        if id.len() < 8 || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+            eprintln!("WARNING: Unexpected ID format '{}' for model '{}' on line {}", id, name, line_num + 2);
+        }
+
+        // Size is typically "X.X GB" - find GB/MB/KB position
         let mut size_idx = 2;
         let mut size_parts = vec![parts[size_idx]];
+
+        // Validate size value is numeric
+        if parts[size_idx].parse::<f64>().is_err() {
+            eprintln!("WARNING: Invalid size format '{}' for model '{}' on line {}", parts[size_idx], name, line_num + 2);
+            continue;
+        }
+
         if parts.len() > size_idx + 1
             && (parts[size_idx + 1].to_uppercase() == "GB"
-                || parts[size_idx + 1].to_uppercase() == "MB")
+                || parts[size_idx + 1].to_uppercase() == "MB"
+                || parts[size_idx + 1].to_uppercase() == "KB")
         {
             size_parts.push(parts[size_idx + 1]);
             size_idx += 2;
@@ -1093,6 +1167,9 @@ pub fn get_ollama_loaded_models() -> Vec<LoadedModelInfo> {
 
         // Parse size to bytes
         let size_bytes = parse_size_to_bytes(&size);
+        if size_bytes == 0 {
+            eprintln!("WARNING: Failed to parse size '{}' for model '{}' on line {}", size, name, line_num + 2);
+        }
 
         // Processor is typically "100% GPU" or "100% CPU" or "50% GPU/50% CPU"
         let processor_idx = size_idx;
@@ -1122,6 +1199,10 @@ pub fn get_ollama_loaded_models() -> Vec<LoadedModelInfo> {
             processor,
             until,
         });
+    }
+
+    if models.is_empty() && !stdout.trim().is_empty() {
+        eprintln!("WARNING: 'ollama ps' returned data but no models could be parsed. Output format may have changed.");
     }
 
     models

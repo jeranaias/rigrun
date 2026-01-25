@@ -1,0 +1,33 @@
+[package]
+name = "local-rag-rust-server"
+version = "0.1.0"
+edition = "2021"
+description = "Local RAG server with secure session management"
+authors = ["RigRun Team"]
+
+[dependencies]
+# Cryptographically secure random number generation
+rand = "0.8"
+
+# Date/time handling with UTC timestamps for session persistence
+chrono = { version = "0.4", features = ["serde"] }
+
+# Hex encoding for session IDs
+hex = "0.4"
+
+# Error handling
+thiserror = "1.0"
+
+# Async runtime (commonly needed for servers)
+tokio = { version = "1.0", features = ["full"] }
+
+# Serialization (for session persistence)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+# Testing utilities
+tokio-test = "0.4"
+
+[features]
+default = []

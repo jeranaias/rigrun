@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Session Manager for DoD STIG Compliance
 //!
@@ -18,10 +18,13 @@
 //! This is a HARD LIMIT that cannot be exceeded, only reduced.
 
 use chrono::{DateTime, Utc};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
+
+use crate::audit::audit_log_session_event;
 
 /// DoD STIG maximum session timeout: 15 minutes (900 seconds)
 /// This is the MAXIMUM allowed for IL5 environments - cannot be exceeded.
@@ -29,6 +32,10 @@ pub const DOD_STIG_MAX_SESSION_TIMEOUT_SECS: u64 = 900;
 
 /// Default warning time before timeout: 2 minutes (120 seconds)
 pub const DOD_STIG_WARNING_BEFORE_TIMEOUT_SECS: u64 = 120;
+
+/// Absolute maximum session duration: 12 hours (43200 seconds)
+/// Sessions MUST be rotated after this time regardless of activity.
+pub const DOD_STIG_ABSOLUTE_SESSION_MAX_SECS: u64 = 43200;
 
 /// Session state enumeration
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +85,13 @@ pub enum SessionEvent {
         user_id: String,
         timestamp: DateTime<Utc>,
     },
+    /// Session ID was rotated due to privilege change
+    Rotated {
+        old_session_id: String,
+        new_session_id: String,
+        timestamp: DateTime<Utc>,
+        reason: String,
+    },
     /// Session activity was refreshed
     Refreshed {
         session_id: String,
@@ -122,6 +136,9 @@ impl SessionEvent {
         match self {
             SessionEvent::Created { session_id, user_id, .. } => {
                 format!("{} | SESSION_CREATED | session={} user={}", timestamp, session_id, user_id)
+            }
+            SessionEvent::Rotated { old_session_id, new_session_id, reason, .. } => {
+                format!("{} | SESSION_ROTATED | old={} new={} reason={}", timestamp, old_session_id, new_session_id, reason)
             }
             SessionEvent::Refreshed { session_id, time_remaining_secs, .. } => {
                 format!("{} | SESSION_REFRESHED | session={} remaining={}s", timestamp, session_id, time_remaining_secs)
@@ -223,6 +240,26 @@ impl SessionConfig {
     }
 }
 
+/// Privilege level for session-based access control
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum PrivilegeLevel {
+    /// Guest or unauthenticated user
+    Guest = 0,
+    /// Regular authenticated user
+    User = 1,
+    /// Administrative user
+    Admin = 2,
+    /// System/root level access
+    System = 3,
+}
+
+impl PrivilegeLevel {
+    /// Check if this privilege level allows escalation to another level
+    pub fn can_escalate_to(&self, target: PrivilegeLevel) -> bool {
+        (*self as u8) < (target as u8)
+    }
+}
+
 /// Session instance representing an authenticated user session
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -232,6 +269,9 @@ pub struct Session {
     /// User identifier (for audit logging)
     pub user_id: String,
 
+    /// Current privilege level (for session rotation on escalation)
+    pub privilege_level: PrivilegeLevel,
+
     /// When the session was created
     pub created_at: Instant,
 
@@ -240,6 +280,9 @@ pub struct Session {
 
     /// Last activity timestamp
     pub last_activity: Instant,
+
+    /// Last session rotation timestamp (for periodic rotation)
+    pub last_rotation: Instant,
 
     /// Session configuration
     config: SessionConfig,
@@ -255,28 +298,48 @@ pub struct Session {
 }
 
 impl Session {
-    /// Create a new session
+    /// Create a new session with default User privilege level
     pub fn new(id: impl Into<String>, user_id: impl Into<String>, config: SessionConfig) -> Self {
+        Self::new_with_privilege(id, user_id, PrivilegeLevel::User, config)
+    }
+
+    /// Create a new session with a specific privilege level
+    pub fn new_with_privilege(
+        id: impl Into<String>,
+        user_id: impl Into<String>,
+        privilege_level: PrivilegeLevel,
+        config: SessionConfig,
+    ) -> Self {
         let now = Instant::now();
         let session = Self {
             id: id.into(),
             user_id: user_id.into(),
+            privilege_level,
             created_at: now,
             created_at_utc: Utc::now(),
             last_activity: now,
+            last_rotation: now,
             config,
             state: SessionState::Active,
             consent_acknowledged: false,
             warning_issued: false,
         };
 
-        // Log session creation
+        // Log session creation to both tracing and persistent audit trail
         let event = SessionEvent::Created {
             session_id: session.id.clone(),
             user_id: session.user_id.clone(),
             timestamp: session.created_at_utc,
         };
         tracing::info!("{}", event.to_audit_string());
+
+        // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+        audit_log_session_event(
+            "SESSION_CREATED",
+            session.id.clone(),
+            Some(session.user_id.clone()),
+            None,
+        );
 
         session
     }
@@ -285,14 +348,26 @@ impl Session {
     ///
     /// A session expires when:
     /// 1. Inactivity timeout exceeded (time since last_activity > max_timeout)
-    /// 2. Session is in Expired, Locked, or Terminated state
+    /// 2. Absolute session timeout exceeded (time since created_at > absolute max)
+    /// 3. Session is in Expired, Locked, or Terminated state
     pub fn is_expired(&self) -> bool {
         if self.state.requires_reauth() {
             return true;
         }
 
+        // Check inactivity timeout
         let elapsed = self.last_activity.elapsed();
-        elapsed.as_secs() >= self.config.max_timeout_secs
+        if elapsed.as_secs() >= self.config.max_timeout_secs {
+            return true;
+        }
+
+        // Check absolute session timeout (12 hours max)
+        let total_duration = self.created_at.elapsed();
+        if total_duration.as_secs() >= DOD_STIG_ABSOLUTE_SESSION_MAX_SECS {
+            return true;
+        }
+
+        false
     }
 
     /// Check if the session is in warning period
@@ -338,18 +413,37 @@ impl Session {
                 timestamp: Utc::now(),
             };
             tracing::warn!("{}", event.to_audit_string());
+
+            // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+            audit_log_session_event(
+                "REAUTH_REQUIRED",
+                self.id.clone(),
+                Some(self.user_id.clone()),
+                Some(format!("state={}", self.state)),
+            );
+
             return self.state;
         }
 
         // Check if session has timed out
         if self.is_expired() {
             self.state = SessionState::Expired;
+            let duration = self.session_duration_secs();
             let event = SessionEvent::Expired {
                 session_id: self.id.clone(),
                 timestamp: Utc::now(),
-                session_duration_secs: self.session_duration_secs(),
+                session_duration_secs: duration,
             };
             tracing::info!("{}", event.to_audit_string());
+
+            // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+            audit_log_session_event(
+                "SESSION_EXPIRED",
+                self.id.clone(),
+                Some(self.user_id.clone()),
+                Some(format!("duration={}s", duration)),
+            );
+
             return SessionState::Expired;
         }
 
@@ -364,6 +458,14 @@ impl Session {
             time_remaining_secs: remaining,
         };
         tracing::debug!("{}", event.to_audit_string());
+
+        // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+        audit_log_session_event(
+            "SESSION_REFRESHED",
+            self.id.clone(),
+            Some(self.user_id.clone()),
+            Some(format!("remaining={}s", remaining)),
+        );
 
         // Update state
         self.state = SessionState::Active;
@@ -383,12 +485,22 @@ impl Session {
         // Check for expiration
         if self.is_expired() {
             self.state = SessionState::Expired;
+            let duration = self.session_duration_secs();
             let event = SessionEvent::Expired {
                 session_id: self.id.clone(),
                 timestamp: Utc::now(),
-                session_duration_secs: self.session_duration_secs(),
+                session_duration_secs: duration,
             };
             tracing::info!("{}", event.to_audit_string());
+
+            // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+            audit_log_session_event(
+                "SESSION_EXPIRED",
+                self.id.clone(),
+                Some(self.user_id.clone()),
+                Some(format!("duration={}s", duration)),
+            );
+
             return (SessionState::Expired, Some(self.config.expiration_message.clone()));
         }
 
@@ -407,6 +519,14 @@ impl Session {
                     expires_in_secs: remaining,
                 };
                 tracing::warn!("{}", event.to_audit_string());
+
+                // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+                audit_log_session_event(
+                    "SESSION_WARNING",
+                    self.id.clone(),
+                    Some(self.user_id.clone()),
+                    Some(format!("expires_in={}s", remaining)),
+                );
 
                 let message = self.config.warning_message_template
                     .replace("{minutes}", &minutes.to_string())
@@ -430,6 +550,14 @@ impl Session {
             reason: reason.to_string(),
         };
         tracing::info!("{}", event.to_audit_string());
+
+        // IL5 Compliance: Log to persistent audit trail (AC-11, AU-3)
+        audit_log_session_event(
+            "SESSION_LOCKED",
+            self.id.clone(),
+            Some(self.user_id.clone()),
+            Some(format!("reason={}", reason)),
+        );
     }
 
     /// Terminate the session
@@ -441,6 +569,14 @@ impl Session {
             reason: reason.to_string(),
         };
         tracing::info!("{}", event.to_audit_string());
+
+        // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+        audit_log_session_event(
+            "SESSION_TERMINATED",
+            self.id.clone(),
+            Some(self.user_id.clone()),
+            Some(format!("reason={}", reason)),
+        );
     }
 
     /// Acknowledge consent banner
@@ -466,6 +602,34 @@ impl Session {
     /// Get session configuration
     pub fn config(&self) -> &SessionConfig {
         &self.config
+    }
+
+    /// Check if session should be rotated based on time since last rotation
+    /// Sessions should be rotated every 2 hours (7200 seconds) for long-lived sessions
+    pub fn should_rotate_periodic(&self) -> bool {
+        const ROTATION_INTERVAL_SECS: u64 = 7200; // 2 hours
+        self.last_rotation.elapsed().as_secs() >= ROTATION_INTERVAL_SECS
+    }
+
+    /// Update privilege level and mark that rotation is needed
+    /// Returns true if privilege level changed (rotation required)
+    pub fn set_privilege_level(&mut self, new_level: PrivilegeLevel) -> bool {
+        if self.privilege_level != new_level {
+            let old_level = self.privilege_level;
+            self.privilege_level = new_level;
+
+            tracing::info!(
+                "PRIVILEGE_CHANGE | session={} user={} old={:?} new={:?}",
+                self.id,
+                self.user_id,
+                old_level,
+                new_level
+            );
+
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -496,17 +660,26 @@ impl SessionManager {
         Self::new(SessionConfig::dod_stig_default())
     }
 
-    /// Generate a unique session ID
+    /// Generate a cryptographically secure session ID
+    ///
+    /// Uses 128 bits of cryptographic randomness (16 bytes = 32 hex chars).
+    /// Format: sess_<32 hex chars>
+    ///
+    /// CRITICAL: If crypto RNG fails, this will panic rather than fall back
+    /// to weak randomness. This is by design for security compliance.
     fn generate_session_id(&self) -> String {
-        use std::sync::atomic::Ordering;
+        let mut bytes = [0u8; 16]; // 128 bits
 
-        let counter = self.id_counter.fetch_add(1, Ordering::SeqCst);
-        let timestamp = Utc::now().timestamp_millis();
+        // Use cryptographically secure random number generator
+        let mut rng = rand::thread_rng();
+        rng.fill_bytes(&mut bytes);
 
-        // Generate a random component
-        let random: u32 = rand::random();
+        // Format as hex string with prefix (manual hex encoding)
+        let hex_string: String = bytes.iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
 
-        format!("sess_{}_{}_{:08x}", timestamp, counter, random)
+        format!("sess_{}", hex_string)
     }
 
     /// Create a new session for a user
@@ -554,6 +727,87 @@ impl SessionManager {
         None
     }
 
+    /// Atomically validate and refresh a session in a single operation.
+    ///
+    /// This method eliminates the race condition between validate_session() and
+    /// refresh_session() by performing both operations while holding the write lock.
+    ///
+    /// Returns (is_valid, state, optional_message, time_remaining_secs)
+    /// - If valid: refreshes the session and returns (true, state, message, time_remaining)
+    /// - If invalid: returns (false, state, message, 0) without refresh
+    ///
+    /// # Concurrency Safety
+    /// This operation is atomic - no other thread can modify the session between
+    /// validation and refresh, eliminating TOCTOU race conditions.
+    pub fn validate_and_refresh_session(&self, session_id: &str) -> (bool, SessionState, Option<String>, u64) {
+        if let Ok(mut sessions) = self.sessions.write() {
+            if let Some(session) = sessions.get_mut(session_id) {
+                // First, update the state (this may change state to Expired or Warning)
+                let (state, message) = session.update_state();
+                let is_valid = state.is_active();
+
+                if is_valid {
+                    // Atomically refresh only if the session is still valid
+                    session.refresh();
+                    let time_remaining = session.time_remaining_secs();
+                    return (true, state, message, time_remaining);
+                } else {
+                    // Session is not valid, don't refresh
+                    return (false, state, message, 0);
+                }
+            }
+        }
+        (false, SessionState::Expired, Some("Session not found".to_string()), 0)
+    }
+
+    /// Atomically get a session and refresh it in a single operation.
+    ///
+    /// This method eliminates the race condition where a session could expire
+    /// between get() and refresh() calls by performing both atomically.
+    ///
+    /// Returns Some((session_clone, time_remaining)) if the session is valid,
+    /// or None if the session is not found or has expired.
+    ///
+    /// # Concurrency Safety
+    /// The session is refreshed before returning, and the returned clone reflects
+    /// the refreshed state. No other thread can expire the session between
+    /// validation and refresh.
+    pub fn get_and_refresh_session(&self, session_id: &str) -> Option<(Session, u64)> {
+        if let Ok(mut sessions) = self.sessions.write() {
+            if let Some(session) = sessions.get_mut(session_id) {
+                // Check if expired first
+                if session.is_expired() {
+                    // Mark as expired in state if not already
+                    if session.state != SessionState::Expired {
+                        session.state = SessionState::Expired;
+                        let duration = session.session_duration_secs();
+                        let event = SessionEvent::Expired {
+                            session_id: session.id.clone(),
+                            timestamp: Utc::now(),
+                            session_duration_secs: duration,
+                        };
+                        tracing::info!("{}", event.to_audit_string());
+
+                        // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+                        audit_log_session_event(
+                            "SESSION_EXPIRED",
+                            session.id.clone(),
+                            Some(session.user_id.clone()),
+                            Some(format!("duration={}s", duration)),
+                        );
+                    }
+                    return None;
+                }
+
+                // Atomically refresh and return clone
+                session.refresh();
+                let time_remaining = session.time_remaining_secs();
+                return Some((session.clone(), time_remaining));
+            }
+        }
+        None
+    }
+
     /// Terminate a session
     pub fn terminate_session(&self, session_id: &str, reason: &str) -> bool {
         if let Ok(mut sessions) = self.sessions.write() {
@@ -563,6 +817,47 @@ impl SessionManager {
             }
         }
         false
+    }
+
+    /// Rotate session ID (e.g., when privileges change)
+    ///
+    /// Creates a new session ID for the same user while preserving session state.
+    /// This prevents session fixation attacks when user privileges escalate.
+    pub fn rotate_session_id(&self, old_session_id: &str, reason: &str) -> Option<String> {
+        if let Ok(mut sessions) = self.sessions.write() {
+            if let Some(mut old_session) = sessions.remove(old_session_id) {
+                // Generate new session ID
+                let new_session_id = self.generate_session_id();
+
+                // Update session ID and rotation timestamp
+                let old_id = old_session.id.clone();
+                old_session.id = new_session_id.clone();
+                old_session.last_rotation = Instant::now();
+
+                // Log rotation event
+                let event = SessionEvent::Rotated {
+                    old_session_id: old_id.clone(),
+                    new_session_id: new_session_id.clone(),
+                    timestamp: Utc::now(),
+                    reason: reason.to_string(),
+                };
+                tracing::info!("{}", event.to_audit_string());
+
+                // IL5 Compliance: Log to persistent audit trail (AC-12, AU-3)
+                audit_log_session_event(
+                    "SESSION_ROTATED",
+                    new_session_id.clone(),
+                    Some(old_session.user_id.clone()),
+                    Some(format!("old_session={} reason={}", old_id, reason)),
+                );
+
+                // Store with new ID
+                sessions.insert(new_session_id.clone(), old_session);
+
+                return Some(new_session_id);
+            }
+        }
+        None
     }
 
     /// Remove expired sessions from the manager
@@ -595,6 +890,55 @@ impl SessionManager {
     /// Get session configuration
     pub fn config(&self) -> &SessionConfig {
         &self.config
+    }
+
+    /// Update session privilege level and automatically rotate session ID if privilege escalated
+    ///
+    /// Returns Some(new_session_id) if rotation occurred, None if no rotation needed
+    pub fn update_privilege_level(
+        &self,
+        session_id: &str,
+        new_level: PrivilegeLevel,
+    ) -> Option<String> {
+        // First, check if privilege level actually changed
+        let should_rotate = if let Ok(mut sessions) = self.sessions.write() {
+            if let Some(session) = sessions.get_mut(session_id) {
+                session.set_privilege_level(new_level)
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
+
+        // If privilege changed, rotate the session ID
+        if should_rotate {
+            let reason = format!("privilege_escalation_to_{:?}", new_level);
+            self.rotate_session_id(session_id, &reason)
+        } else {
+            None
+        }
+    }
+
+    /// Check if session should be rotated periodically and rotate if needed
+    ///
+    /// Returns Some(new_session_id) if rotation occurred, None if no rotation needed
+    pub fn check_and_rotate_periodic(&self, session_id: &str) -> Option<String> {
+        let should_rotate = if let Ok(sessions) = self.sessions.read() {
+            if let Some(session) = sessions.get(session_id) {
+                session.should_rotate_periodic()
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
+
+        if should_rotate {
+            self.rotate_session_id(session_id, "periodic_rotation")
+        } else {
+            None
+        }
     }
 }
 
@@ -731,5 +1075,173 @@ mod tests {
         session.acknowledge_consent();
 
         assert!(!session.needs_consent_reack());
+    }
+
+    #[test]
+    fn test_validate_and_refresh_session_atomic() {
+        let manager = SessionManager::dod_stig_default();
+        let session = manager.create_session("test-user");
+        let session_id = session.id.clone();
+
+        // Atomic validate and refresh should work
+        let (is_valid, state, _, time_remaining) =
+            manager.validate_and_refresh_session(&session_id);
+
+        assert!(is_valid);
+        assert_eq!(state, SessionState::Active);
+        assert!(time_remaining > 0);
+    }
+
+    #[test]
+    fn test_get_and_refresh_session_atomic() {
+        let manager = SessionManager::dod_stig_default();
+        let session = manager.create_session("test-user");
+        let session_id = session.id.clone();
+
+        // Atomic get and refresh should work
+        let result = manager.get_and_refresh_session(&session_id);
+        assert!(result.is_some());
+
+        let (refreshed_session, time_remaining) = result.unwrap();
+        assert_eq!(refreshed_session.id, session_id);
+        assert!(time_remaining > 0);
+    }
+
+    #[test]
+    fn test_validate_and_refresh_nonexistent_session() {
+        let manager = SessionManager::dod_stig_default();
+
+        let (is_valid, state, message, time_remaining) =
+            manager.validate_and_refresh_session("nonexistent-session");
+
+        assert!(!is_valid);
+        assert_eq!(state, SessionState::Expired);
+        assert!(message.is_some());
+        assert_eq!(time_remaining, 0);
+    }
+
+    #[test]
+    fn test_get_and_refresh_nonexistent_session() {
+        let manager = SessionManager::dod_stig_default();
+
+        let result = manager.get_and_refresh_session("nonexistent-session");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_concurrent_validate_and_refresh() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let manager = Arc::new(SessionManager::dod_stig_default());
+        let session = manager.create_session("test-user");
+        let session_id = session.id.clone();
+
+        // Spawn multiple threads that concurrently validate and refresh
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let manager_clone = Arc::clone(&manager);
+            let session_id_clone = session_id.clone();
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    let (is_valid, _, _, _) =
+                        manager_clone.validate_and_refresh_session(&session_id_clone);
+                    assert!(is_valid);
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().expect("Thread panicked");
+        }
+
+        // Session should still be valid after concurrent access
+        let (is_valid, _, _, _) = manager.validate_and_refresh_session(&session_id);
+        assert!(is_valid);
+    }
+
+    #[test]
+    fn test_concurrent_get_and_refresh() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let manager = Arc::new(SessionManager::dod_stig_default());
+        let session = manager.create_session("test-user");
+        let session_id = session.id.clone();
+
+        // Spawn multiple threads that concurrently get and refresh
+        let mut handles = vec![];
+        for _ in 0..10 {
+            let manager_clone = Arc::clone(&manager);
+            let session_id_clone = session_id.clone();
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    let result = manager_clone.get_and_refresh_session(&session_id_clone);
+                    assert!(result.is_some());
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().expect("Thread panicked");
+        }
+
+        // Session should still be valid after concurrent access
+        let result = manager.get_and_refresh_session(&session_id);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_no_race_between_refresh_and_get() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let manager = Arc::new(SessionManager::dod_stig_default());
+        let session = manager.create_session("test-user");
+        let session_id = session.id.clone();
+
+        // Spawn threads that do get operations
+        let mut handles = vec![];
+        for _ in 0..5 {
+            let manager_clone = Arc::clone(&manager);
+            let session_id_clone = session_id.clone();
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    // Use atomic get_and_refresh to prevent race
+                    let result = manager_clone.get_and_refresh_session(&session_id_clone);
+                    // Session should always be valid since we're refreshing it atomically
+                    assert!(result.is_some(), "Session was unexpectedly invalid during get");
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Spawn threads that do validate_and_refresh operations
+        for _ in 0..5 {
+            let manager_clone = Arc::clone(&manager);
+            let session_id_clone = session_id.clone();
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    // Use atomic validate_and_refresh to prevent race
+                    let (is_valid, _, _, _) =
+                        manager_clone.validate_and_refresh_session(&session_id_clone);
+                    assert!(is_valid, "Session was unexpectedly invalid during validate");
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().expect("Thread panicked");
+        }
+
+        // Final check - session should still be valid
+        let (is_valid, _, _, _) = manager.validate_and_refresh_session(&session_id);
+        assert!(is_valid);
     }
 }

@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! CLI Session Manager for DoD STIG IL5 Compliance
 //!
@@ -30,6 +30,7 @@
 
 use chrono::{DateTime, Utc};
 use colored::Colorize;
+use rand::RngCore;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -148,9 +149,11 @@ impl CliSession {
         let utc_now = Utc::now();
         let user_id_string = user_id.into();
 
-        // Generate session ID
-        let random: u32 = rand::random();
-        let session_id = format!("cli_sess_{}_{:08x}", utc_now.timestamp_millis(), random);
+        // Generate session ID with cryptographically secure random bytes
+        let mut bytes = [0u8; 16];
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        let random_hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        let session_id = format!("cli_sess_{}_{}", utc_now.timestamp_millis(), random_hex);
 
         // Log session creation
         tracing::info!(

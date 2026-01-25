@@ -1,0 +1,49 @@
+rigrun - Classification-Aware LLM Router
+Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+
+================================================================================
+LICENSING
+================================================================================
+
+This software is dual-licensed:
+
+1. GNU Affero General Public License v3.0 (AGPL-3.0)
+   For open source use with copyleft requirements.
+   See LICENSE file.
+
+2. Commercial License
+   For proprietary use without copyleft requirements.
+   See LICENSE-COMMERCIAL.md or contact licensing@morganforge.com
+
+================================================================================
+TRADE SECRETS
+================================================================================
+
+Certain components of this software are proprietary trade secrets and are
+NOT distributed in the public repository. These include but are not limited to:
+
+- Classification marker detection algorithms
+- Spillage prevention logic
+- DoD IL5 compliance implementations
+- Advanced query routing systems
+
+Unauthorized access to, copying of, or distribution of trade secret components
+is prohibited and may result in legal action.
+
+================================================================================
+THIRD-PARTY COMPONENTS
+================================================================================
+
+This software includes or depends on the following third-party components:
+
+- Ollama (MIT License) - https://github.com/ollama/ollama
+- Bubble Tea (MIT License) - https://github.com/charmbracelet/bubbletea
+- Lip Gloss (MIT License) - https://github.com/charmbracelet/lipgloss
+- llama.cpp (MIT License) - https://github.com/ggerganov/llama.cpp
+
+================================================================================
+CONTACT
+================================================================================
+
+Jesse Morgan / Morgan Forge
+Email: licensing@morganforge.com

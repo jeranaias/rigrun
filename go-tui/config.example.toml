@@ -1,0 +1,131 @@
+# rigrun configuration file
+# Copy this to ~/.rigrun/config.toml and customize as needed
+
+version = "1.0.0"
+default_model = "qwen2.5-coder:14b"
+
+# =============================================================================
+# ROUTING CONFIGURATION
+# =============================================================================
+[routing]
+# Routing mode: "auto", "cloud", "local", "hybrid"
+# - auto: Let OpenRouter decide the optimal model/route
+# - local: Force local Ollama only
+# - cloud: Force cloud only
+# - hybrid: Alias for "auto" (deprecated)
+default_mode = "auto"
+
+# Maximum tier to route to: "cache", "local", "cloud", "haiku", "sonnet", "opus", "gpt-4o"
+max_tier = "sonnet"
+
+# Paranoid mode: block all cloud requests
+paranoid_mode = false
+
+# Offline mode (IL5 SC-7): block ALL network except localhost Ollama
+# When true: no cloud, no web fetch, no telemetry - only localhost:11434 allowed
+offline_mode = false
+
+# Auto mode preferences
+auto_prefer_local = false
+auto_max_cost = 0.0  # 0 = unlimited
+auto_fallback = "local"
+
+# =============================================================================
+# LOCAL (OLLAMA) CONFIGURATION
+# =============================================================================
+[local]
+ollama_url = "http://127.0.0.1:11434"
+ollama_model = "qwen2.5-coder:14b"
+
+# =============================================================================
+# CLOUD (OPENROUTER) CONFIGURATION
+# =============================================================================
+[cloud]
+# Your OpenRouter API key
+# Can also be set via RIGRUN_OPENROUTER_KEY environment variable
+openrouter_key = ""
+default_model = "anthropic/claude-3.5-sonnet"
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+[security]
+# Session timeout (15-30 minutes per IL5 AC-12 compliance)
+session_timeout_secs = 1800  # 30 minutes
+
+# Audit logging
+audit_enabled = true
+audit_log_path = ""  # Empty = default ~/.rigrun/audit.log
+
+# Classification banner
+banner_enabled = false
+classification = "UNCLASSIFIED"
+
+# Consent requirement (IL5 AC-8)
+consent_required = true
+
+# Account lockout (AC-7)
+max_login_attempts = 3
+lockout_duration_minutes = 15
+lockout_enabled = true
+
+# Authentication session duration (IA-2)
+auth_session_duration_hours = 8
+
+# MFA (placeholder for future)
+mfa_enabled = false
+
+# Encryption (SC-28)
+encryption_enabled = true
+encrypt_config = true
+encrypt_cache = true
+encrypt_audit = false
+
+# FIPS mode (SC-13)
+fips_mode = false
+
+# TLS settings (SC-17)
+tls_min_version = "TLS1.2"
+certificate_pinning = false
+
+# Spillage detection (IR-9)
+spillage_detection = true
+spillage_action = "warn"  # "warn", "block", or "sanitize"
+
+# =============================================================================
+# CACHE CONFIGURATION
+# =============================================================================
+[cache]
+enabled = true
+ttl_hours = 24
+max_size = 10000
+semantic_enabled = true
+semantic_threshold = 0.92
+
+# =============================================================================
+# UI CONFIGURATION
+# =============================================================================
+[ui]
+# Theme: "dark", "light", "auto"
+theme = "dark"
+
+# Display options
+show_cost = true
+show_tokens = true
+compact_mode = false
+
+# Vim mode: Enable vim-style modal editing
+# - true: Vim mode enabled (start in NORMAL mode, use 'i' to enter INSERT)
+# - false: Standard editing (always in insert mode)
+vim_mode = false
+
+# Tutorial
+tutorial_completed = false
+tutorial_step = 0
+
+# =============================================================================
+# CONSENT CONFIGURATION (IL5 AC-8)
+# =============================================================================
+[consent]
+required = true
+accepted = false

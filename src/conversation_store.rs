@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Conversation Storage Module for rigrun
 //!
@@ -282,6 +282,8 @@ pub enum CommandResult {
     Resume(SavedConversation),
     /// Change status bar style (returns the new style)
     SetStatusBarStyle(StatusLineStyle),
+    /// Change classification level (returns new level)
+    SetClassification(rigrun::ClassificationLevel),
 }
 
 /// Parse and handle slash commands in the chat
@@ -615,13 +617,71 @@ pub fn handle_slash_command(
             Ok(CommandResult::Handled)
         }
 
+        "classify" | "classification" | "class" => {
+            use rigrun::ClassificationLevel;
+
+            println!();
+            println!("  Data Classification (per DoDI 5200.48):");
+            println!("  {}", "-".repeat(50));
+            println!();
+            println!("  Available levels:");
+            println!("    {} - No special handling required", "unclassified".green());
+            println!("               Cloud routing allowed");
+            println!("    {}          - Controlled Unclassified Information", "cui".yellow());
+            println!("               Cloud routing BLOCKED (local-only)");
+            println!("    {}       - CUI with specified category", "cui-sp".yellow());
+            println!("               Cloud routing BLOCKED (local-only)");
+            println!();
+
+            if args.is_empty() {
+                println!("  Usage: /classify <level>");
+                println!("  Example: /classify unclassified");
+                println!("           /classify cui");
+                println!();
+                println!("  Note: Changing classification affects query routing.");
+                println!("        CUI data must remain on-premise.");
+            } else {
+                let level_arg = args[0].to_lowercase();
+                let new_level = match level_arg.as_str() {
+                    "unclassified" | "u" | "unclass" => Some(ClassificationLevel::Unclassified),
+                    "cui" | "c" => Some(ClassificationLevel::Cui),
+                    "cui-sp" | "cuisp" | "cui_sp" | "specified" => Some(ClassificationLevel::CuiSpecified),
+                    _ => None,
+                };
+
+                match new_level {
+                    Some(level) => {
+                        let level_display = match level {
+                            ClassificationLevel::Unclassified => "UNCLASSIFIED".green(),
+                            ClassificationLevel::Cui => "CUI".yellow(),
+                            ClassificationLevel::CuiSpecified => "CUI//SP".yellow(),
+                        };
+                        let routing_note = if level >= ClassificationLevel::Cui {
+                            " (cloud routing now BLOCKED)".red().to_string()
+                        } else {
+                            " (cloud routing enabled)".green().to_string()
+                        };
+                        println!("  {} Classification: {}{}", "\u{2713}".green(), level_display, routing_note);
+                        println!();
+                        return Ok(CommandResult::SetClassification(level));
+                    }
+                    None => {
+                        println!("  {} Unknown classification: {}", "\u{26A0}".yellow(), level_arg);
+                        println!("      Valid levels: unclassified, cui, cui-sp");
+                    }
+                }
+            }
+            println!();
+            Ok(CommandResult::Handled)
+        }
+
         _ => {
             println!("\n  Unknown command: /{}", command);
             // Suggest similar commands
             let known_commands = ["help", "h", "save", "s", "resume", "r", "history", "list", "ls",
                                   "delete", "del", "rm", "autosave", "auto", "new", "clear", "reset",
                                   "exit", "quit", "q", "status", "stat", "model", "m", "mode", "retry",
-                                  "statusbar", "sb"];
+                                  "statusbar", "sb", "classify", "classification", "class"];
             if let Some(suggestion) = find_similar_command(&command, &known_commands) {
                 println!("  Did you mean: {}?", format!("/{}", suggestion).cyan());
             }
@@ -697,6 +757,8 @@ fn print_help() {
     println!("                       (fixed, compact, minimal, full, off)");
     println!("    /model, /m         Show/change current model");
     println!("    /mode              Show/change routing mode (local/cloud/auto/hybrid)");
+    println!("    /classify          Set data classification (unclassified/cui/cui-sp)");
+    println!("                       CUI+ blocks cloud routing per DoDI 5200.48");
     println!("    /retry, /r!        Resend last failed message");
     println!("    /tips              Show quick tips for new users");
     println!("    /help, /h, /?      Show this help message");
@@ -710,6 +772,7 @@ fn print_help() {
     println!("    - Use /statusbar fixed for a persistent status bar at top");
     println!("    - Press Ctrl+C during response to interrupt");
     println!("    - Use /retry after an error to resend your message");
+    println!("    - Use /classify to set data sensitivity level");
     println!();
 }
 

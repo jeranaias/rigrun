@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
 # rigrun installer for Mac/Linux/WSL
 # Usage: curl -fsSL https://rigrun.dev/install.sh | sh
 

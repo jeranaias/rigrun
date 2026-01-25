@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Context Mention System for rigrun CLI
 //!
@@ -33,8 +33,35 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::LazyLock;
 use anyhow::{anyhow, Context, Result};
 use regex::Regex;
+
+// IL5: Static regex patterns - compiled once at first use, never panic at runtime
+static FILE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"@file:(?:"([^"]+)"|'([^']+)'|(\S+))"#)
+        .expect("FILE_PATTERN is a valid regex")
+});
+
+static GIT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@git(?::(\S+))?")
+        .expect("GIT_PATTERN is a valid regex")
+});
+
+static CODEBASE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@codebase\b")
+        .expect("CODEBASE_PATTERN is a valid regex")
+});
+
+static ERROR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@error\b")
+        .expect("ERROR_PATTERN is a valid regex")
+});
+
+static CLIPBOARD_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@clipboard\b")
+        .expect("CLIPBOARD_PATTERN is a valid regex")
+});
 
 /// Types of context that can be mentioned with @ syntax
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -114,19 +141,10 @@ pub fn parse_mentions(input: &str) -> (Vec<ContextMention>, String) {
     let mut seen = HashSet::new();
     let mut remaining = input.to_string();
 
-    // Pattern for @file:path (path can contain letters, numbers, /, \, ., -, _, and spaces if quoted)
-    let file_pattern = Regex::new(r#"@file:(?:"([^"]+)"|'([^']+)'|(\S+))"#).unwrap();
-
-    // Pattern for @git:range or @git
-    let git_pattern = Regex::new(r"@git(?::(\S+))?").unwrap();
-
-    // Simple patterns
-    let codebase_pattern = Regex::new(r"@codebase\b").unwrap();
-    let error_pattern = Regex::new(r"@error\b").unwrap();
-    let clipboard_pattern = Regex::new(r"@clipboard\b").unwrap();
+    // IL5: Use static patterns - never panic at runtime
 
     // Extract @file mentions
-    for cap in file_pattern.captures_iter(input) {
+    for cap in FILE_PATTERN.captures_iter(input) {
         let path_str = cap.get(1)
             .or_else(|| cap.get(2))
             .or_else(|| cap.get(3))
@@ -142,11 +160,11 @@ pub fn parse_mentions(input: &str) -> (Vec<ContextMention>, String) {
             mentions.push(mention);
         }
 
-        remaining = file_pattern.replace(&remaining, "").to_string();
+        remaining = FILE_PATTERN.replace(&remaining, "").to_string();
     }
 
     // Extract @git mentions
-    for cap in git_pattern.captures_iter(input) {
+    for cap in GIT_PATTERN.captures_iter(input) {
         let range = cap.get(1).map(|m| m.as_str().to_string());
         let mention = ContextMention::Git { range };
 
@@ -155,36 +173,36 @@ pub fn parse_mentions(input: &str) -> (Vec<ContextMention>, String) {
             mentions.push(mention);
         }
     }
-    remaining = git_pattern.replace_all(&remaining, "").to_string();
+    remaining = GIT_PATTERN.replace_all(&remaining, "").to_string();
 
     // Extract @codebase mentions
-    if codebase_pattern.is_match(input) {
+    if CODEBASE_PATTERN.is_match(input) {
         let mention = ContextMention::Codebase;
         if !seen.contains(&mention) {
             seen.insert(mention.clone());
             mentions.push(mention);
         }
-        remaining = codebase_pattern.replace_all(&remaining, "").to_string();
+        remaining = CODEBASE_PATTERN.replace_all(&remaining, "").to_string();
     }
 
     // Extract @error mentions
-    if error_pattern.is_match(input) {
+    if ERROR_PATTERN.is_match(input) {
         let mention = ContextMention::Error;
         if !seen.contains(&mention) {
             seen.insert(mention.clone());
             mentions.push(mention);
         }
-        remaining = error_pattern.replace_all(&remaining, "").to_string();
+        remaining = ERROR_PATTERN.replace_all(&remaining, "").to_string();
     }
 
     // Extract @clipboard mentions
-    if clipboard_pattern.is_match(input) {
+    if CLIPBOARD_PATTERN.is_match(input) {
         let mention = ContextMention::Clipboard;
         if !seen.contains(&mention) {
             seen.insert(mention.clone());
             mentions.push(mention);
         }
-        remaining = clipboard_pattern.replace_all(&remaining, "").to_string();
+        remaining = CLIPBOARD_PATTERN.replace_all(&remaining, "").to_string();
     }
 
     // Clean up remaining text

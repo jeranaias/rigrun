@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Security Module for DoD STIG Compliance
 //!
@@ -31,9 +31,11 @@
 //! }
 //! ```
 
+pub mod locks;
 pub mod session_manager;
 
+pub use locks::{resilient_read, resilient_write, try_resilient_read, try_resilient_write};
 pub use session_manager::{
-    Session, SessionConfig, SessionManager, SessionState, SessionEvent,
+    Session, SessionConfig, SessionManager, SessionState, SessionEvent, PrivilegeLevel,
     DOD_STIG_MAX_SESSION_TIMEOUT_SECS, DOD_STIG_WARNING_BEFORE_TIMEOUT_SECS,
 };

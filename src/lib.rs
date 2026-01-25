@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! rigrun - Local-first LLM router library
 //!
@@ -58,6 +58,8 @@ pub use types::{
 pub use router::{
     classify_query, route_query, route_query_detailed,
     QueryComplexity, QueryResult, QueryType, RoutingDecision,
+    // Escalation types (with classification enforcement)
+    EscalationResult,
 };
 
 // Re-export cache types
@@ -90,13 +92,14 @@ pub use local::{OllamaClient, OllamaResponse};
 pub use types::Message;
 pub use stats::{QueryStats, SessionStats, StatsTracker, SavingsSummary};
 pub use cloud::OpenRouterClient;
-pub use server::Server;
+pub use server::{Server, parse_classification_header};
 pub use utils::mask_sensitive;
 
 // Re-export audit types
 pub use audit::{
-    AuditEntry, AuditLogger, AuditTier,
-    audit_log_query, audit_log_blocked, is_audit_enabled, set_audit_enabled,
+    AuditEntry, AuditLogger, AuditTier, SessionAuditEntry,
+    audit_log_query, audit_log_blocked, audit_log_session_event,
+    is_audit_enabled, set_audit_enabled,
     init_audit_logger, global_audit_logger, redact_secrets,
 };
 

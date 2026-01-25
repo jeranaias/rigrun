@@ -1,0 +1,381 @@
+================================================================================
+COMPETITIVE INTELLIGENCE SYSTEM - COMPLETE ARCHITECTURE
+================================================================================
+
+                          ┌───────────────────────────┐
+                          │    User Command Line      │
+                          │  rigrun intel "Anthropic" │
+                          └────────────┬──────────────┘
+                                       │
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                        INTEL ORCHESTRATOR                                 │
+│  - Parse company name                                                     │
+│  - Load configuration                                                     │
+│  - Initialize agent session                                               │
+│  - Check report cache (exact match)                                       │
+│  - Coordinate 4 phases: Discovery → Research → Analysis → Report         │
+└───────────────────────────────┬──────────────────────────────────────────┘
+                                │
+            ┌───────────────────┼───────────────────┐
+            │                   │                   │
+            ▼                   ▼                   ▼
+┌────────────────────┐ ┌────────────────────┐ ┌────────────────────┐
+│  CLASSIFICATION    │ │   CACHE MANAGER    │ │   AUDIT LOGGER     │
+│    ROUTER          │ │  (3-Level Cache)   │ │  (IL5 Compliant)   │
+└────────┬───────────┘ └────────┬───────────┘ └────────┬───────────┘
+         │                      │                      │
+         │ CUI? ──Yes──> Force Local                  │
+         │                      │                      │
+         │                      │                      │
+         ▼                      ▼                      ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         PHASE 1: DISCOVERY                               │
+│  Objective: Find basic information (local routing)                       │
+│  Duration: ~30 seconds | Cost: $0.00                                     │
+└───────────┬─────────────────────────────────────────────────────────────┘
+            │
+            ├─► Module 1: Company Overview
+            │   └─► Tool: WebSearch("Anthropic overview history")
+            │       └─► Local LLM: Extract name, founded, mission
+            │
+            ├─► Module 2: Funding & Financials
+            │   └─► Tool: WebSearch("Anthropic funding rounds")
+            │       └─► Local LLM: Extract total, valuation, investors
+            │
+            └─► Module 3: Leadership Team
+                └─► Tool: WebSearch("Anthropic CEO leadership")
+                    └─► Local LLM: Extract C-suite names, backgrounds
+                    │
+                    ▼
+        ┌─────────────────────────┐
+        │   SEMANTIC CACHE        │
+        │  TTL: 7-30 days         │
+        │  All search results     │
+        └─────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      PHASE 2: DEEP RESEARCH                              │
+│  Objective: Gather detailed data (local → cloud routing)                 │
+│  Duration: ~1 minute | Cost: $0.03-0.05                                  │
+└───────────┬─────────────────────────────────────────────────────────────┘
+            │
+            ├─► Module 4: Product Portfolio
+            │   ├─► Tool: WebFetch("https://anthropic.com/pricing")
+            │   ├─► Tool: WebFetch("https://anthropic.com/docs")
+            │   └─► Cloud LLM (Sonnet): Compare features to rigrun
+            │
+            ├─► Module 5: Technology Stack
+            │   ├─► Tool: WebSearch("Anthropic engineering blog")
+            │   ├─► Tool: Bash("gh repo view anthropic/anthropic-sdk-python")
+            │   └─► Local LLM: Aggregate tech stack
+            │
+            ├─► Module 6: Recent News
+            │   ├─► Tool: WebSearch("Anthropic news 2025")
+            │   ├─► Tool: WebFetch("https://anthropic.com/blog")
+            │   └─► Local LLM: Summarize recent events
+            │
+            └─► Module 7: Market Position
+                ├─► Tool: WebSearch("Anthropic customers case studies")
+                ├─► Tool: WebFetch("https://anthropic.com/customers")
+                └─► Cloud LLM (Sonnet): Analyze market position
+                    │
+                    ▼
+        ┌─────────────────────────┐
+        │   SEMANTIC CACHE        │
+        │  TTL: 1-24 hours        │
+        │  All fetched pages      │
+        └─────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                       PHASE 3: ANALYSIS                                  │
+│  Objective: Strategic synthesis (cloud routing, unless CUI)              │
+│  Duration: ~1.5 minutes | Cost: $0.20-0.40                               │
+└───────────┬─────────────────────────────────────────────────────────────┘
+            │
+            ├─► Module 8: Competitive Analysis
+            │   ├─► Context: All data from Modules 1-7
+            │   ├─► Prompt: "Perform SWOT analysis..."
+            │   └─► Cloud LLM (Sonnet): Generate SWOT matrix
+            │       ├─► Strengths: Constitutional AI, 200K context
+            │       ├─► Weaknesses: Cloud-only, limited models
+            │       ├─► Opportunities: Enterprise, government
+            │       └─► Threats: Open source, GPT-4
+            │
+            └─► Module 9: Strategic Recommendations
+                ├─► Context: Full competitive analysis
+                ├─► Prompt: "Recommend strategic actions for rigrun..."
+                └─► Cloud LLM (Opus): Generate 3-5 recommendations
+                    └─► Examples:
+                        1. Emphasize local-first positioning
+                        2. Target government/defense market
+                        3. Highlight multi-model flexibility
+                    │
+                    ▼
+        ┌─────────────────────────┐
+        │   SEMANTIC CACHE        │
+        │  TTL: 7 days            │
+        │  Analysis results       │
+        └─────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    PHASE 4: REPORT GENERATION                            │
+│  Objective: Format output (local routing)                                │
+│  Duration: ~10 seconds | Cost: $0.00                                     │
+└───────────┬─────────────────────────────────────────────────────────────┘
+            │
+            ├─► Step 16: Format Markdown Report
+            │   ├─► Tool: Read("~/.rigrun/intel/templates/report_template.md")
+            │   ├─► Local LLM: Populate template with research data
+            │   └─► Tool: Write("~/.rigrun/intel/reports/anthropic_2025-01-23.md")
+            │
+            ├─► Step 17: Generate JSON Export (if --format json)
+            │   ├─► Local LLM: Convert to JSON structure
+            │   └─► Tool: Write("~/.rigrun/intel/reports/anthropic_2025-01-23.json")
+            │
+            ├─► Step 18: Generate PDF (if --format pdf)
+            │   └─► Tool: Bash("pandoc report.md -o report.pdf")
+            │
+            └─► Step 19: Log to Audit Trail
+                ├─► Audit Logger: Record all URLs accessed
+                ├─► Audit Logger: Record routing decisions
+                ├─► Audit Logger: Record tokens and cost
+                └─► HMAC signature for integrity
+                    │
+                    ▼
+        ┌─────────────────────────┐
+        │    EXACT CACHE          │
+        │  TTL: Permanent         │
+        │  Complete report        │
+        └─────────────────────────┘
+                    │
+                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         FINALIZATION                                     │
+└───────────┬─────────────────────────────────────────────────────────────┘
+            │
+            ├─► Update stats.json
+            │   ├─► Total companies researched: +1
+            │   ├─► Total tokens consumed: +42,891
+            │   └─► Total cost: +$0.43
+            │
+            ├─► Print summary to user
+            │   ┌────────────────────────────────────────────┐
+            │   │ Summary:                                   │
+            │   │ - Researched 9 modules in 3m 31s           │
+            │   │ - Queries: 24 (18 search, 6 fetch)         │
+            │   │ - Tokens: 42,891 (85% local, 15% cloud)    │
+            │   │ - Cost: $0.43                              │
+            │   │ - Cache hits: 8/24 (33%)                   │
+            │   │                                            │
+            │   │ Report: ~/.rigrun/intel/reports/...md      │
+            │   └────────────────────────────────────────────┘
+            │
+            └─► Return report path to user
+
+================================================================================
+DATA FLOW LAYERS
+================================================================================
+
+┌───────────────────────────────────────────────────────────────────────┐
+│ LAYER 1: TOOLS (Execution)                                            │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
+│  │WebSearch │  │ WebFetch │  │   Bash   │  │  Write   │             │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘             │
+│       └─────────────┴─────────────┴─────────────┘                    │
+└───────────────────────────────┬───────────────────────────────────────┘
+                                │
+┌───────────────────────────────┴───────────────────────────────────────┐
+│ LAYER 2: ROUTING (Intelligence)                                       │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │  Classification Check (FIRST)                                │     │
+│  │  └─► CUI/SECRET? ──Yes──> FORCE LOCAL                       │     │
+│  │                      No                                      │     │
+│  │                      │                                       │     │
+│  │                      ▼                                       │     │
+│  │  Complexity Analysis                                         │     │
+│  │  ├─► Discovery: TierLocal (qwen2.5:14b)                     │     │
+│  │  ├─► Research: TierLocal → TierCloud (escalate if needed)   │     │
+│  │  ├─► Analysis: TierSonnet/Opus (strategic synthesis)        │     │
+│  │  └─► Report: TierLocal (simple formatting)                  │     │
+│  └─────────────────────────────────────────────────────────────┘     │
+└───────────────────────────────┬───────────────────────────────────────┘
+                                │
+┌───────────────────────────────┴───────────────────────────────────────┐
+│ LAYER 3: CACHING (Performance)                                        │
+│  ┌────────────────────┬────────────────────┬────────────────────┐    │
+│  │  Report Cache      │  Module Cache      │  Query Cache       │    │
+│  │  (Exact)           │  (Semantic)        │  (Semantic)        │    │
+│  │  TTL: Permanent    │  TTL: 1-30 days    │  TTL: 1-7 days     │    │
+│  └────────────────────┴────────────────────┴────────────────────┘    │
+└───────────────────────────────┬───────────────────────────────────────┘
+                                │
+┌───────────────────────────────┴───────────────────────────────────────┐
+│ LAYER 4: AUDIT (Compliance)                                           │
+│  ┌─────────────────────────────────────────────────────────────┐     │
+│  │  Every action logged:                                        │     │
+│  │  - Timestamp, user, classification                           │     │
+│  │  - Tool used, query/URL                                      │     │
+│  │  - Routing tier, tokens, cost                                │     │
+│  │  - HMAC signature for integrity                              │     │
+│  │                                                               │     │
+│  │  File: ~/.rigrun/intel/audit.log                             │     │
+│  └─────────────────────────────────────────────────────────────┘     │
+└───────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+ROUTING DECISION TREE
+================================================================================
+
+                         User Query: rigrun intel "Anthropic"
+                                        │
+                                        ▼
+                         ┌──────────────────────────┐
+                         │  Classification Check    │
+                         │  (ALWAYS FIRST)          │
+                         └──────────┬───────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+                    ▼                               ▼
+         ┌─────────────────────┐       ┌─────────────────────┐
+         │  CUI/SECRET/TS?     │       │  UNCLASSIFIED       │
+         │  (Classification >= │       │                     │
+         │   ClassificationCUI)│       │                     │
+         └──────────┬──────────┘       └──────────┬──────────┘
+                    │                              │
+                    ▼                              │
+         ┌─────────────────────┐                  │
+         │  FORCE LOCAL        │                  │
+         │  - No cloud APIs    │                  │
+         │  - qwen2.5:32b      │                  │
+         │  - Encrypt results  │                  │
+         │  - Cost: $0.00      │                  │
+         └─────────────────────┘                  │
+                                                   ▼
+                                        ┌─────────────────────┐
+                                        │  Complexity-Based   │
+                                        │  Routing            │
+                                        └──────────┬──────────┘
+                                                   │
+                    ┌──────────────────────────────┼──────────────────────────┐
+                    │                              │                          │
+                    ▼                              ▼                          ▼
+         ┌─────────────────────┐      ┌─────────────────────┐    ┌─────────────────────┐
+         │  Discovery Phase    │      │  Research Phase     │    │  Analysis Phase     │
+         │  (Simple)           │      │  (Moderate)         │    │  (Complex)          │
+         └──────────┬──────────┘      └──────────┬──────────┘    └──────────┬──────────┘
+                    │                            │                          │
+                    ▼                            ▼                          ▼
+         ┌─────────────────────┐      ┌─────────────────────┐    ┌─────────────────────┐
+         │  TierLocal          │      │  TierLocal →        │    │  TierSonnet/Opus    │
+         │  qwen2.5:14b        │      │  TierCloud          │    │  (Cloud)            │
+         │  Cost: $0.00        │      │  (Escalate)         │    │  Cost: $0.20-0.40   │
+         └─────────────────────┘      └─────────────────────┘    └─────────────────────┘
+
+================================================================================
+COST BREAKDOWN BY PHASE
+================================================================================
+
+Phase 1: Discovery
+├─ Module 1: Company Overview         $0.00 (local)
+├─ Module 2: Funding                  $0.00 (local)
+└─ Module 3: Leadership               $0.00 (local)
+   Subtotal:                          $0.00
+
+Phase 2: Deep Research
+├─ Module 4: Product Portfolio        $0.04 (local→cloud)
+├─ Module 5: Tech Stack               $0.00 (local)
+├─ Module 6: News                     $0.00 (local)
+└─ Module 7: Market Position          $0.03 (local→cloud)
+   Subtotal:                          $0.07
+
+Phase 3: Analysis
+├─ Module 8: Competitive Analysis     $0.12 (cloud: Sonnet)
+└─ Module 9: Recommendations          $0.24 (cloud: Opus)
+   Subtotal:                          $0.36
+
+Phase 4: Report Generation
+└─ Format & Export                    $0.00 (local)
+   Subtotal:                          $0.00
+
+═════════════════════════════════════════════════════════════════════
+TOTAL COST:                          $0.43 (UNCLASSIFIED)
+TOTAL COST:                          $0.00 (CUI - 100% local)
+═════════════════════════════════════════════════════════════════════
+
+Local/Cloud Split: 85% local, 15% cloud
+Time: 3m 31s
+Tokens: 42,891 (85% local, 15% cloud)
+
+================================================================================
+CACHE HIERARCHY
+================================================================================
+
+                         Cache Manager
+                               │
+        ┌──────────────────────┼──────────────────────┐
+        │                      │                      │
+        ▼                      ▼                      ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│  Report Cache    │  │  Module Cache    │  │  Query Cache     │
+│  (Exact Match)   │  │  (Semantic)      │  │  (Semantic)      │
+└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
+         │                     │                     │
+         │                     │                     │
+┌────────┴─────────┐  ┌────────┴─────────┐  ┌────────┴─────────┐
+│ Key:             │  │ Key:             │  │ Key:             │
+│ company_name     │  │ module:company   │  │ query_hash       │
+│                  │  │                  │  │                  │
+│ Value:           │  │ Value:           │  │ Value:           │
+│ Complete report  │  │ Module results   │  │ Raw results      │
+│                  │  │                  │  │                  │
+│ TTL:             │  │ TTL:             │  │ TTL:             │
+│ Permanent        │  │ 1-30 days        │  │ 1-7 days         │
+│                  │  │                  │  │                  │
+│ Hit Rate:        │  │ Hit Rate:        │  │ Hit Rate:        │
+│ 10-20%           │  │ 30-40%           │  │ 40-50%           │
+└──────────────────┘  └──────────────────┘  └──────────────────┘
+
+Overall Cache Hit Rate: 33% average
+Savings: 34% time, 33% cost
+
+================================================================================
+SECURITY LAYERS
+================================================================================
+
+Layer 1: Classification Check (Compile-time enforced)
+         │
+         ├─► UNCLASSIFIED: Normal routing
+         ├─► CUI: FORCE LOCAL (cloud blocked)
+         ├─► SECRET: FORCE LOCAL + encryption
+         └─► TOP_SECRET: FORCE LOCAL + encryption + air-gap
+
+Layer 2: Path-Based Permissions (Runtime checks)
+         │
+         ├─► Sensitive paths blocked: ~/.ssh, .env, credentials
+         └─► System paths require approval: /etc, /sys, /proc
+
+Layer 3: Audit Logging (IL5 compliant)
+         │
+         ├─► Every action logged with timestamp
+         ├─► HMAC signature for integrity
+         └─► Tamper detection on read
+
+Layer 4: Secret Redaction (Automatic)
+         │
+         ├─► API keys redacted: sk-***
+         ├─► URLs redacted: https://***
+         └─► Emails redacted: ***@example.com
+
+Layer 5: Data Encryption (Classification-based)
+         │
+         ├─► UNCLASSIFIED: Plain text
+         └─► CUI+: AES-256 encryption at rest
+
+================================================================================
+END OF ARCHITECTURE DIAGRAM
+================================================================================

@@ -1,9 +1,0 @@
-These are the changes needed for Bearer token authentication:
-
-1. Add api_key to AppState (line ~70)
-2. Add api_key to ServerConfig (line ~83)
-3. Add with_api_key() method after with_cors_origins() (around line 160)
-4. Update AppState initialization to include api_key (around line 195)
-5. Split router into public and protected routes (around line 220)
-6. Add require_auth middleware before handlers section (around line 375)
-7. Update security warning for 0.0.0.0 binding (around line 245)

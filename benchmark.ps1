@@ -1,3 +1,6 @@
+# Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 $prompt = "Write a Python function to check if a number is prime."
 
 $models = @("qwen2.5:14b", "mistral-small", "codestral:22b", "gemma2:27b")

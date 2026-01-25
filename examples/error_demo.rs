@@ -1,3 +1,6 @@
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 //! Demo showing the improved error messages in rigrun.
 //!
 //! This example demonstrates the consistent error formatting across

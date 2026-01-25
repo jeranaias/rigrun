@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Query Router - Intelligent routing for RAG queries.
 //!
@@ -92,8 +92,11 @@ impl Tier {
         }
     }
 
-    /// Get next tier up (for escalation on failure).
-    pub fn escalate(&self) -> Option<Tier> {
+    /// Internal escalation logic - returns next tier without classification checks.
+    ///
+    /// SECURITY WARNING: This is PRIVATE. Do NOT make this public.
+    /// Use `try_escalate()` which enforces classification-based routing restrictions.
+    fn escalate_unchecked(&self) -> Option<Tier> {
         match self {
             Self::Cache => Some(Self::Local),
             Self::Local => Some(Self::Cloud),
@@ -102,6 +105,107 @@ impl Tier {
             Self::Sonnet => Some(Self::Opus),
             Self::Opus => None,
             Self::Gpt4o => None,
+        }
+    }
+
+    /// Check if a tier is a cloud tier (Haiku, Sonnet, Opus, Cloud, GPT-4o).
+    ///
+    /// Cloud tiers send data off-premise and are BLOCKED for CUI+ classifications.
+    pub fn is_cloud_tier(&self) -> bool {
+        matches!(self, Self::Cloud | Self::Haiku | Self::Sonnet | Self::Opus | Self::Gpt4o)
+    }
+
+    /// Attempt to escalate to the next tier with classification enforcement.
+    ///
+    /// # Security
+    ///
+    /// CRITICAL: This function enforces classification-based routing restrictions.
+    /// - If classification >= CUI, escalation to ANY cloud tier is BLOCKED
+    /// - Blocked escalation attempts are audit logged
+    /// - Returns `EscalationResult` indicating success, blocked, or no escalation available
+    ///
+    /// # Parameters
+    ///
+    /// - `classification`: The classification level of the query
+    /// - `query_preview`: Optional query preview for audit logging (first 50 chars)
+    ///
+    /// # Returns
+    ///
+    /// - `EscalationResult::Success(Tier)` - Escalation allowed, use this tier
+    /// - `EscalationResult::Blocked` - Escalation blocked due to classification
+    /// - `EscalationResult::NotAvailable` - No higher tier available
+    pub fn try_escalate(
+        &self,
+        classification: crate::ClassificationLevel,
+        query_preview: Option<&str>,
+    ) -> EscalationResult {
+        use crate::ClassificationLevel;
+
+        // Get the next tier (if any)
+        let Some(next_tier) = self.escalate_unchecked() else {
+            return EscalationResult::NotAvailable;
+        };
+
+        // CRITICAL SECURITY CHECK: Block cloud escalation for CUI+ classifications
+        if classification >= ClassificationLevel::Cui && next_tier.is_cloud_tier() {
+            // Audit log the blocked escalation attempt
+            if let Some(logger) = crate::audit::global_audit_logger().read().ok() {
+                let query = query_preview.unwrap_or("[no query provided]");
+                let _ = logger.log_blocked(next_tier, query, None, None);
+            }
+
+            // Log to stderr for immediate visibility in debug scenarios
+            eprintln!(
+                "[SECURITY] Escalation to {} BLOCKED: Classification {:?} prohibits cloud routing",
+                next_tier.name(),
+                classification
+            );
+
+            return EscalationResult::Blocked {
+                requested_tier: next_tier,
+                classification,
+            };
+        }
+
+        EscalationResult::Success(next_tier)
+    }
+}
+
+/// Result of an escalation attempt.
+///
+/// Returned by `Tier::try_escalate()` to indicate whether escalation
+/// was successful, blocked by classification, or not available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EscalationResult {
+    /// Escalation allowed - use this tier
+    Success(Tier),
+    /// Escalation blocked due to classification restrictions
+    Blocked {
+        /// The tier that was requested but blocked
+        requested_tier: Tier,
+        /// The classification that caused the block
+        classification: crate::ClassificationLevel,
+    },
+    /// No higher tier available (already at max)
+    NotAvailable,
+}
+
+impl EscalationResult {
+    /// Returns `true` if escalation was successful.
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Success(_))
+    }
+
+    /// Returns `true` if escalation was blocked due to classification.
+    pub fn is_blocked(&self) -> bool {
+        matches!(self, Self::Blocked { .. })
+    }
+
+    /// Returns the new tier if escalation was successful.
+    pub fn tier(&self) -> Option<Tier> {
+        match self {
+            Self::Success(tier) => Some(*tier),
+            _ => None,
         }
     }
 }
@@ -303,9 +407,51 @@ pub fn classify_query(query: &str) -> QueryComplexity {
 
 /// Route a query to the appropriate tier.
 ///
-/// Takes the query and optional configuration to decide which tier to use.
-/// Respects max_tier to cap costs.
-pub fn route_query(query: &str, max_tier: Option<Tier>) -> Tier {
+/// Takes the query, classification level, paranoid mode flag, and optional configuration
+/// to decide which tier to use. Enforces classification-based routing restrictions.
+///
+/// # Security
+///
+/// CRITICAL: Classification enforcement is the FIRST check before any other routing logic.
+/// - If classification >= CUI, FORCE return Tier::Local (NEVER route to cloud)
+/// - If paranoid_mode is true, NEVER allow cloud fallback regardless of local failures
+/// - These checks take precedence over all other routing decisions
+///
+/// # Parameters
+///
+/// - `query`: The query text to route
+/// - `classification`: The classification level of the query (UNCLASSIFIED, CUI, etc.)
+/// - `paranoid_mode`: If true, block all cloud routing regardless of classification
+/// - `max_tier`: Optional tier cap for cost control
+pub fn route_query(
+    query: &str,
+    classification: crate::ClassificationLevel,
+    paranoid_mode: bool,
+    max_tier: Option<Tier>,
+) -> Tier {
+    use crate::ClassificationLevel;
+
+    // CRITICAL SECURITY CHECK #1: Classification enforcement
+    // CUI and higher classifications MUST stay on-premise
+    if classification >= ClassificationLevel::Cui {
+        // Audit log the classification-based routing decision
+        if let Ok(logger) = crate::audit::global_audit_logger().read() {
+            let _ = logger.log_blocked(Tier::Cloud, query, None, None);
+        }
+        return Tier::Local;
+    }
+
+    // CRITICAL SECURITY CHECK #2: Paranoid mode enforcement
+    // When paranoid mode is enabled, NEVER allow cloud routing
+    if paranoid_mode {
+        // Audit log the paranoid mode block
+        if let Ok(logger) = crate::audit::global_audit_logger().read() {
+            let _ = logger.log_blocked(Tier::Cloud, query, None, None);
+        }
+        return Tier::Local;
+    }
+
+    // Normal routing logic (only reached if classification allows cloud)
     let complexity = classify_query(query);
     let recommended = complexity.min_tier();
 
@@ -329,11 +475,69 @@ pub struct RoutingDecision {
 /// Make a detailed routing decision for a query.
 ///
 /// Returns full analysis including tier, complexity, type, and reasoning.
-pub fn route_query_detailed(query: &str, max_tier: Option<Tier>) -> RoutingDecision {
+///
+/// # Security
+///
+/// CRITICAL: Classification enforcement is the FIRST check before any other routing logic.
+/// - If classification >= CUI, FORCE return Tier::Local (NEVER route to cloud)
+/// - If paranoid_mode is true, NEVER allow cloud fallback regardless of local failures
+pub fn route_query_detailed(
+    query: &str,
+    classification: crate::ClassificationLevel,
+    paranoid_mode: bool,
+    max_tier: Option<Tier>,
+) -> RoutingDecision {
+    use crate::ClassificationLevel;
+
     let complexity = classify_query(query);
     let query_type = QueryType::classify(query);
     let recommended = complexity.min_tier();
 
+    // CRITICAL SECURITY CHECK #1: Classification enforcement
+    // CUI and higher classifications MUST stay on-premise
+    if classification >= ClassificationLevel::Cui {
+        // Audit log the classification-based routing decision
+        if let Ok(logger) = crate::audit::global_audit_logger().read() {
+            let _ = logger.log_blocked(Tier::Cloud, query, None, None);
+        }
+
+        let reason = format!(
+            "Query classified as {:?} complexity ({:?} type) -> Local tier (FORCED: {} classification blocks cloud)",
+            complexity, query_type, classification
+        );
+
+        return RoutingDecision {
+            tier: Tier::Local,
+            complexity,
+            query_type,
+            estimated_cost_cents: 0.0, // Local is free
+            reason,
+        };
+    }
+
+    // CRITICAL SECURITY CHECK #2: Paranoid mode enforcement
+    // When paranoid mode is enabled, NEVER allow cloud routing
+    if paranoid_mode {
+        // Audit log the paranoid mode block
+        if let Ok(logger) = crate::audit::global_audit_logger().read() {
+            let _ = logger.log_blocked(Tier::Cloud, query, None, None);
+        }
+
+        let reason = format!(
+            "Query classified as {:?} complexity ({:?} type) -> Local tier (FORCED: paranoid mode blocks cloud)",
+            complexity, query_type
+        );
+
+        return RoutingDecision {
+            tier: Tier::Local,
+            complexity,
+            query_type,
+            estimated_cost_cents: 0.0, // Local is free
+            reason,
+        };
+    }
+
+    // Normal routing logic (only reached if classification allows cloud)
     let tier = match max_tier {
         Some(cap) if recommended > cap => cap,
         _ => recommended,
@@ -443,11 +647,137 @@ mod tests {
     }
 
     #[test]
-    fn test_tier_escalation() {
-        assert_eq!(Tier::Cache.escalate(), Some(Tier::Local));
-        assert_eq!(Tier::Local.escalate(), Some(Tier::Cloud));
-        assert_eq!(Tier::Cloud.escalate(), None);
-        assert_eq!(Tier::Opus.escalate(), None);
+    fn test_tier_escalation_unclassified() {
+        use crate::ClassificationLevel;
+
+        // UNCLASSIFIED queries can escalate freely through all tiers
+        let unclass = ClassificationLevel::Unclassified;
+
+        // Cache -> Local (allowed)
+        assert_eq!(
+            Tier::Cache.try_escalate(unclass, None),
+            EscalationResult::Success(Tier::Local)
+        );
+
+        // Local -> Cloud (allowed for UNCLASSIFIED)
+        assert_eq!(
+            Tier::Local.try_escalate(unclass, None),
+            EscalationResult::Success(Tier::Cloud)
+        );
+
+        // Cloud has no escalation path
+        assert_eq!(
+            Tier::Cloud.try_escalate(unclass, None),
+            EscalationResult::NotAvailable
+        );
+
+        // Opus has no escalation path
+        assert_eq!(
+            Tier::Opus.try_escalate(unclass, None),
+            EscalationResult::NotAvailable
+        );
+
+        // Haiku -> Sonnet (allowed for UNCLASSIFIED)
+        assert_eq!(
+            Tier::Haiku.try_escalate(unclass, None),
+            EscalationResult::Success(Tier::Sonnet)
+        );
+
+        // Sonnet -> Opus (allowed for UNCLASSIFIED)
+        assert_eq!(
+            Tier::Sonnet.try_escalate(unclass, None),
+            EscalationResult::Success(Tier::Opus)
+        );
+    }
+
+    #[test]
+    fn test_tier_escalation_cui_blocked() {
+        use crate::ClassificationLevel;
+
+        // CUI classifications MUST block escalation to ANY cloud tier
+        let cui = ClassificationLevel::Cui;
+
+        // Cache -> Local (allowed even for CUI - Local is on-premise)
+        assert_eq!(
+            Tier::Cache.try_escalate(cui, None),
+            EscalationResult::Success(Tier::Local)
+        );
+
+        // Local -> Cloud (BLOCKED for CUI)
+        let result = Tier::Local.try_escalate(cui, Some("test CUI query"));
+        assert!(result.is_blocked());
+        assert_eq!(
+            result,
+            EscalationResult::Blocked {
+                requested_tier: Tier::Cloud,
+                classification: cui,
+            }
+        );
+
+        // Haiku -> Sonnet (BLOCKED for CUI - both are cloud tiers, but if somehow
+        // we ended up on Haiku with CUI, escalation must still be blocked)
+        let result = Tier::Haiku.try_escalate(cui, Some("test CUI query"));
+        assert!(result.is_blocked());
+
+        // Sonnet -> Opus (BLOCKED for CUI)
+        let result = Tier::Sonnet.try_escalate(cui, Some("test CUI query"));
+        assert!(result.is_blocked());
+    }
+
+    #[test]
+    fn test_tier_escalation_cui_specified_blocked() {
+        use crate::ClassificationLevel;
+
+        // CUI//SP (specified) is higher than CUI, must also block cloud
+        let cui_sp = ClassificationLevel::CuiSpecified;
+
+        // Local -> Cloud (BLOCKED for CUI//SP)
+        let result = Tier::Local.try_escalate(cui_sp, Some("test CUI//SP query"));
+        assert!(result.is_blocked());
+        assert_eq!(
+            result,
+            EscalationResult::Blocked {
+                requested_tier: Tier::Cloud,
+                classification: cui_sp,
+            }
+        );
+    }
+
+    #[test]
+    fn test_is_cloud_tier() {
+        // Cloud tiers - these send data off-premise
+        assert!(Tier::Cloud.is_cloud_tier());
+        assert!(Tier::Haiku.is_cloud_tier());
+        assert!(Tier::Sonnet.is_cloud_tier());
+        assert!(Tier::Opus.is_cloud_tier());
+        assert!(Tier::Gpt4o.is_cloud_tier());
+
+        // Non-cloud tiers - these are on-premise
+        assert!(!Tier::Cache.is_cloud_tier());
+        assert!(!Tier::Local.is_cloud_tier());
+    }
+
+    #[test]
+    fn test_escalation_result_helpers() {
+        use crate::ClassificationLevel;
+
+        let success = EscalationResult::Success(Tier::Cloud);
+        assert!(success.is_success());
+        assert!(!success.is_blocked());
+        assert_eq!(success.tier(), Some(Tier::Cloud));
+
+        let blocked = EscalationResult::Blocked {
+            requested_tier: Tier::Cloud,
+            classification: ClassificationLevel::Cui,
+        };
+        assert!(!blocked.is_success());
+        assert!(blocked.is_blocked());
+        assert_eq!(blocked.tier(), None);
+
+        let not_available = EscalationResult::NotAvailable;
+        assert!(!not_available.is_success());
+        assert!(!not_available.is_blocked());
+        assert_eq!(not_available.tier(), None);
     }
 
     #[test]
@@ -484,19 +814,64 @@ mod tests {
 
     #[test]
     fn test_routing() {
+        use crate::ClassificationLevel;
+
+        // UNCLASSIFIED queries with normal routing (no paranoid mode)
+        let unclass = ClassificationLevel::Unclassified;
+
         // Trivial queries route to Cache tier (< 5 words, no keywords)
-        assert_eq!(route_query("hello", None), Tier::Cache);
-        assert_eq!(route_query("hi there", None), Tier::Cache);
+        assert_eq!(route_query("hello", unclass, false, None), Tier::Cache);
+        assert_eq!(route_query("hi there", unclass, false, None), Tier::Cache);
 
         // Simple queries route to Local (basic lookups only)
-        assert_eq!(route_query("what is rust", None), Tier::Local);
+        assert_eq!(route_query("what is rust", unclass, false, None), Tier::Local);
 
         // Moderate+ queries route to Cloud (OpenRouter auto) - lowered threshold!
         // 5+ words or code-related keywords go to cloud
-        assert_eq!(route_query("how do I fix this error", None), Tier::Cloud); // "error" keyword
-        assert_eq!(route_query("explain how async runtime works", None), Tier::Cloud);
-        assert_eq!(route_query("should I use microservices", None), Tier::Cloud);
-        assert_eq!(route_query("review this code please", None), Tier::Cloud); // "review" + "code"
-        assert_eq!(route_query("tell me about this topic here now", None), Tier::Cloud); // 7 words
+        assert_eq!(route_query("how do I fix this error", unclass, false, None), Tier::Cloud); // "error" keyword
+        assert_eq!(route_query("explain how async runtime works", unclass, false, None), Tier::Cloud);
+        assert_eq!(route_query("should I use microservices", unclass, false, None), Tier::Cloud);
+        assert_eq!(route_query("review this code please", unclass, false, None), Tier::Cloud); // "review" + "code"
+        assert_eq!(route_query("tell me about this topic here now", unclass, false, None), Tier::Cloud); // 7 words
+    }
+
+    #[test]
+    fn test_classification_enforcement() {
+        use crate::ClassificationLevel;
+
+        // CUI classification FORCES local routing, regardless of complexity
+        let cui = ClassificationLevel::Cui;
+        assert_eq!(route_query("simple query", cui, false, None), Tier::Local);
+        assert_eq!(route_query("complex expert level architectural decision", cui, false, None), Tier::Local);
+        assert_eq!(route_query("review this code please", cui, false, None), Tier::Local);
+
+        // Even if max_tier is Cloud, CUI forces Local
+        assert_eq!(route_query("any query", cui, false, Some(Tier::Cloud)), Tier::Local);
+    }
+
+    #[test]
+    fn test_paranoid_mode_enforcement() {
+        use crate::ClassificationLevel;
+
+        // Paranoid mode FORCES local routing for UNCLASSIFIED queries
+        let unclass = ClassificationLevel::Unclassified;
+        assert_eq!(route_query("simple query", unclass, true, None), Tier::Local);
+        assert_eq!(route_query("complex query with many words", unclass, true, None), Tier::Local);
+        assert_eq!(route_query("expert architectural decision", unclass, true, None), Tier::Local);
+
+        // Even if max_tier is Cloud, paranoid mode forces Local
+        assert_eq!(route_query("any query", unclass, true, Some(Tier::Cloud)), Tier::Local);
+    }
+
+    #[test]
+    fn test_classification_takes_precedence() {
+        use crate::ClassificationLevel;
+
+        // CUI + paranoid mode (both enforcing local)
+        let cui = ClassificationLevel::Cui;
+        assert_eq!(route_query("any query", cui, true, None), Tier::Local);
+
+        // CUI takes precedence even with Cloud max_tier
+        assert_eq!(route_query("any query", cui, false, Some(Tier::Cloud)), Tier::Local);
     }
 }

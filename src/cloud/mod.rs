@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! OpenRouter integration
 //!
@@ -260,6 +260,33 @@ impl OpenRouterClient {
 
     /// Create a new OpenRouter client with an optional API key.
     ///
+    /// # Security
+    ///
+    /// This client is configured with the following security measures:
+    /// - TLS 1.2+ enforcement
+    /// - Certificate validation enabled (MITM protection)
+    /// - No invalid certificates accepted
+    ///
+    /// # Certificate Pinning
+    ///
+    /// IMPORTANT: For production deployments, consider implementing certificate pinning
+    /// to protect against compromised Certificate Authorities. This can be done by:
+    ///
+    /// 1. Using `.add_root_certificate()` with OpenRouter's CA certificate bundle
+    /// 2. Implementing a custom certificate verifier with rustls
+    /// 3. Pinning specific certificate fingerprints (requires rotation management)
+    ///
+    /// Example with root certificate:
+    /// ```ignore
+    /// use reqwest::tls::Certificate;
+    /// let cert = Certificate::from_pem(OPENROUTER_CA_BUNDLE)?;
+    /// builder.add_root_certificate(cert)
+    /// ```
+    ///
+    /// Note: Certificate pinning requires a rotation strategy to prevent service
+    /// disruption when certificates are renewed. Monitor OpenRouter's certificate
+    /// expiration and implement automated updates.
+    ///
     /// # Panics
     ///
     /// Panics if the HTTP client cannot be built. This should only happen if the system's
@@ -267,6 +294,14 @@ impl OpenRouterClient {
     fn with_api_key_option(api_key: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+            .min_tls_version(reqwest::tls::Version::TLS_1_2)  // IL5: Enforce TLS 1.2+
+            // IL5: Explicitly ensure certificate validation is enabled (defense in depth)
+            // This is the default, but we make it explicit for security auditing
+            .danger_accept_invalid_certs(false)  // NEVER accept invalid certificates
+            // TODO: Certificate Pinning (IL6+)
+            // For enhanced security in production deployments, add certificate pinning:
+            // .add_root_certificate(openrouter_ca_cert)
+            // Or implement custom certificate verification with rustls
             .build()
             .expect("Failed to create HTTP client for OpenRouter. This indicates a critical system configuration issue (TLS/SSL failure).");
 

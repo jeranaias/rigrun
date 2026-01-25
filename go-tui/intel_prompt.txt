@@ -1,0 +1,1 @@
+Read the design document at C:\rigrun\docs\COMPETITIVE_INTEL_SYSTEM_DESIGN.md and the example orchestrator at C:\rigrun\examples\intel\example_orchestrator.go. Then look at C:\rigrun\go-tui\internal\cli\classify_cmd.go for the command pattern. Generate a new intel_cmd.go file that implements the rigrun intel command. Write the file to C:\rigrun\go-tui\internal\cli\intel_cmd.go

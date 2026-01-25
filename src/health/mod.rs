@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Health Check Module for rigrun
 //!
@@ -741,6 +741,7 @@ impl HealthChecker {
         // Try to connect to OpenRouter API
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(5))
+            .min_tls_version(reqwest::tls::Version::TLS_1_2)  // IL5: Enforce TLS 1.2+
             .build();
 
         match client {

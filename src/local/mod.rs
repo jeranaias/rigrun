@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Ollama Integration Module for rigrun.
 //!
@@ -275,10 +275,18 @@ impl OllamaClient {
     ///
     /// * `url` - The base URL for the Ollama API (e.g., "http://localhost:11434")
     ///
+    /// # Deprecated
+    ///
+    /// This method is deprecated for IL5 compliance. Use [`try_with_url`] instead,
+    /// which returns a Result and allows proper error handling without panicking.
+    ///
     /// # Panics
     ///
-    /// This method will panic if the HTTP client cannot be built. For non-initialization code,
-    /// use `try_with_url` instead to handle the error gracefully.
+    /// This method will panic if the HTTP client cannot be built.
+    #[deprecated(
+        since = "0.5.0",
+        note = "IL5 compliance: use try_with_url() instead to handle errors without panicking"
+    )]
     pub fn with_url(url: impl Into<String>) -> Self {
         let url_string = url.into();
         Self::try_with_url(url_string.clone())
@@ -295,11 +303,31 @@ impl OllamaClient {
     ///
     /// # Errors
     ///
-    /// Returns an error if the HTTP client cannot be built. This is extremely rare and
-    /// typically indicates a system-level TLS/SSL configuration problem.
+    /// Returns an error if:
+    /// - The HTTP client cannot be built (rare TLS/SSL issue)
+    /// - The URL uses HTTP for a non-localhost remote host (IL5 security requirement)
+    ///
+    /// # IL5 Compliance
+    ///
+    /// Per NIST SC-8 (Transmission Confidentiality), HTTP is only allowed for localhost
+    /// connections. Remote hosts must use HTTPS to protect data in transit.
     pub fn try_with_url(url: impl Into<String>) -> Result<Self, OllamaError> {
+        let url_string = url.into();
+
+        // IL5: Validate HTTP security - reject http:// for non-localhost
+        if let Err(e) = Self::validate_url_security(&url_string) {
+            tracing::error!(
+                target: "security::network",
+                event = "INSECURE_URL_REJECTED",
+                url = %crate::audit::redact_secrets(&url_string),
+                "IL5 security violation: {}", e
+            );
+            return Err(e);
+        }
+
         let client = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(CONNECTION_TIMEOUT_SECS))
+            .min_tls_version(reqwest::tls::Version::TLS_1_2)  // IL5: Enforce TLS 1.2+
             .build()
             .map_err(|e| {
                 tracing::error!("Failed to build HTTP client: {}", crate::audit::redact_secrets(&e.to_string()));
@@ -310,11 +338,57 @@ impl OllamaClient {
             })?;
 
         Ok(Self {
-            base_url: url.into().trim_end_matches('/').to_string(),
+            base_url: url_string.trim_end_matches('/').to_string(),
             client,
             generation_timeout: Duration::from_secs(GENERATION_TIMEOUT_SECS),
             pull_timeout: Duration::from_secs(PULL_TIMEOUT_SECS),
         })
+    }
+
+    /// Validate URL security per IL5 requirements.
+    ///
+    /// HTTP is only allowed for localhost connections. Remote hosts must use HTTPS.
+    fn validate_url_security(url: &str) -> Result<(), OllamaError> {
+        let url_lower = url.to_lowercase();
+
+        // HTTPS is always allowed
+        if url_lower.starts_with("https://") {
+            return Ok(());
+        }
+
+        // HTTP is only allowed for localhost
+        if url_lower.starts_with("http://") {
+            let host_part = url_lower.trim_start_matches("http://");
+            let host = host_part.split('/').next().unwrap_or("");
+
+            // Handle IPv6 addresses in brackets like [::1]:11434
+            let host_no_port = if host.starts_with('[') {
+                // IPv6 format: [::1]:port or [::1]
+                host.split(']').next().unwrap_or("").trim_start_matches('[')
+            } else {
+                // IPv4 or hostname: host:port or host
+                host.split(':').next().unwrap_or("")
+            };
+
+            // Allow localhost variants
+            if host_no_port == "localhost"
+                || host_no_port == "127.0.0.1"
+                || host_no_port == "::1"
+            {
+                return Ok(());
+            }
+
+            // Reject HTTP to remote hosts
+            return Err(OllamaError::NetworkError(format!(
+                "IL5 security violation: HTTP not allowed for remote host '{}'. \
+                 Use HTTPS for remote connections to protect data in transit. \
+                 HTTP is only permitted for localhost (127.0.0.1, localhost, ::1).",
+                host_no_port
+            )));
+        }
+
+        // Unknown scheme - could be valid (e.g., empty string defaults to localhost)
+        Ok(())
     }
 
     /// Set a custom timeout for generation requests.
@@ -1336,11 +1410,28 @@ mod tests {
 
     #[test]
     fn test_ollama_client_url_normalization() {
-        let client = OllamaClient::with_url("http://localhost:11434/");
+        // Use try_with_url for IL5 compliance - unwrap is acceptable in tests
+        let client = OllamaClient::try_with_url("http://localhost:11434/")
+            .expect("test: valid URL should succeed");
         assert_eq!(client.base_url(), "http://localhost:11434");
 
-        let client2 = OllamaClient::with_url("http://localhost:11434");
+        let client2 = OllamaClient::try_with_url("http://localhost:11434")
+            .expect("test: valid URL should succeed");
         assert_eq!(client2.base_url(), "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_malformed_url_no_panic() {
+        // IL5: Verify malformed URLs return errors instead of panicking
+        // Empty URL should still work (uses default behavior)
+        let result = OllamaClient::try_with_url("");
+        assert!(result.is_ok(), "Empty URL should default to valid client");
+
+        // Very long URLs should be handled gracefully
+        let long_url = "http://".to_string() + &"a".repeat(10000);
+        let result = OllamaClient::try_with_url(long_url);
+        // Should either succeed or return an error, never panic
+        let _ = result; // Explicitly ignore result - we just verify no panic
     }
 
     #[test]
@@ -1362,5 +1453,34 @@ mod tests {
         assert_eq!(response.prompt_tokens, 0);
         assert_eq!(response.completion_tokens, 0);
         assert_eq!(response.total_duration_ms, 0);
+    }
+
+    #[test]
+    fn test_http_security_validation() {
+        // IL5: Test that HTTP to remote hosts is rejected
+
+        // Localhost variants should be allowed with HTTP
+        assert!(OllamaClient::validate_url_security("http://localhost:11434").is_ok());
+        assert!(OllamaClient::validate_url_security("http://127.0.0.1:11434").is_ok());
+        assert!(OllamaClient::validate_url_security("http://[::1]:11434").is_ok());
+        assert!(OllamaClient::validate_url_security("HTTP://LOCALHOST:11434").is_ok());
+
+        // HTTPS should always be allowed
+        assert!(OllamaClient::validate_url_security("https://example.com").is_ok());
+        assert!(OllamaClient::validate_url_security("https://192.168.1.100:11434").is_ok());
+
+        // HTTP to remote hosts should be rejected
+        let result = OllamaClient::validate_url_security("http://example.com:11434");
+        assert!(result.is_err(), "HTTP to remote host should be rejected");
+        assert!(result.unwrap_err().to_string().contains("IL5 security violation"));
+
+        let result = OllamaClient::validate_url_security("http://192.168.1.100:11434");
+        assert!(result.is_err(), "HTTP to remote IP should be rejected");
+
+        let result = OllamaClient::validate_url_security("http://ollama.internal:11434");
+        assert!(result.is_err(), "HTTP to internal hostname should be rejected");
+
+        // Empty/unknown schemes should pass (handled elsewhere)
+        assert!(OllamaClient::validate_url_security("").is_ok());
     }
 }

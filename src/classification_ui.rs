@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 rigrun contributors
-// SPDX-License-Identifier: MIT
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 //
 // CUI Classification UI Markers for DoD IL5 Compliance
 // Per DoDI 5200.48 and 32 CFR Part 2002
@@ -7,15 +7,15 @@
 use std::fmt;
 
 /// Classification levels for information marking
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum ClassificationLevel {
     /// Unclassified - no special handling required
     #[default]
-    Unclassified,
+    Unclassified = 0,
     /// Controlled Unclassified Information - requires CUI markings
-    Cui,
+    Cui = 1,
     /// CUI with specified category
-    CuiSpecified,
+    CuiSpecified = 2,
 }
 
 impl fmt::Display for ClassificationLevel {

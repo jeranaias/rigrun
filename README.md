@@ -117,6 +117,10 @@ rigrun is a classification-aware gateway that ensures sensitive data never leave
 
 **Result**: Full AI capabilities with zero risk of classified data exposure.
 
+**The Project Includes:**
+- **rigrun** (Rust) - The OpenAI-compatible API server with classification routing
+- **rigrun TUI** (Go) - Interactive terminal interface with agentic tool capabilities
+
 ---
 
 ## 5-Minute Quickstart
@@ -308,7 +312,100 @@ rigrun gpu-setup        # GPU setup wizard
 rigrun export           # Export your data (cache, audit log, stats)
 rigrun test --security  # Run security test suite
 rigrun test --adversarial # Run adversarial attack tests
+
+# Go TUI CLI commands
+rigrun ask "question"                  # Single query mode
+rigrun ask --agentic "task"            # Enable agentic tool use
+rigrun ask --agentic -m qwen2.5-coder:14b "task"  # Agentic with specific model
+rigrun ask --max-iter 10 "task"        # Set max agentic iterations
 ```
+
+### Agentic CLI Mode
+
+The CLI supports agentic mode where the model can use tools (Glob, Grep, Read, Bash) to complete tasks:
+
+```bash
+# List files in a directory using Glob tool
+rigrun ask --agentic "List all Python files in /project/src"
+
+# Search codebase using Grep tool
+rigrun ask --agentic "Find all functions that handle authentication"
+
+# Complex multi-step tasks
+rigrun ask --agentic --max-iter 15 "Analyze this codebase and identify security issues"
+```
+
+**Important**: For reliable agentic tasks, use models 7B+ parameters. The CLI will warn you when using an undersized model.
+
+---
+
+## rigrun TUI - Interactive Terminal Interface
+
+The rigrun project includes a full-featured **Go-based TUI** (Terminal User Interface) built with [Bubble Tea](https://github.com/charmbracelet/bubbletea). This provides an interactive chat experience with agentic capabilities.
+
+### Key TUI Features
+
+- **Agentic Tool System**: Local models can use tools (WebSearch, Read, Glob, Grep, Bash) automatically
+- **NIST 800-53 Rev 5 Compliance**: 50+ slash commands organized by security control families
+- **Offline Mode**: Full functionality without internet access
+- **Session Management**: Save, load, and export conversations
+- **Multi-Provider Support**: Ollama, OpenRouter, and direct API integrations
+
+### Quick Start
+
+```bash
+cd go-tui
+go build -o rigrun-tui ./cmd/tui
+./rigrun-tui
+```
+
+### Slash Commands (50+ Available)
+
+| Category | Examples | NIST Controls |
+|----------|----------|---------------|
+| Security | `/audit`, `/compliance`, `/incidents` | AU-6, CA-7, IR-5 |
+| Access Control | `/rbac`, `/permissions`, `/sod` | AC-5, AC-6 |
+| Configuration | `/config`, `/baselines`, `/drift` | CM-5, CM-6 |
+| Sessions | `/save`, `/load`, `/export` | AU-9, CP-9 |
+| Models | `/models guide`, `/models table`, `/models check` | - |
+
+### Model Capability Guide
+
+The TUI includes a built-in model selection guide to help choose the right model for your tasks:
+
+```bash
+/models guide      # Full capability guide with recommendations
+/models table      # Quick comparison table
+/models check <n>  # Check if model is suitable for agentic tasks
+/models info <n>   # Detailed model info with agentic capability
+```
+
+**Model Size Recommendations:**
+
+| Size Tier | Parameters | Best For |
+|-----------|------------|----------|
+| Tiny | <3B | Simple Q&A, classification |
+| Small | 3-7B | Basic tasks, 1-2 tool calls |
+| Medium | 7-14B | Multi-step tasks, coding |
+| Large | 14-32B | Complex analysis, full agentic |
+| XLarge | 32B+ | Expert tasks, long context |
+
+**Agentic Mode Warning**: When using `--agentic` with an undersized model, rigrun automatically warns you and suggests a more capable alternative.
+
+### Agentic Tools
+
+The TUI enables local Ollama models to use tools automatically:
+
+| Tool | Description |
+|------|-------------|
+| **WebSearch** | DuckDuckGo search (no API key required) |
+| **WebFetch** | Fetch and parse web pages |
+| **Read** | Read local files |
+| **Glob** | Find files by pattern |
+| **Grep** | Search file contents |
+| **Bash** | Execute shell commands |
+
+See the full [TUI README](go-tui/README.md) for comprehensive documentation.
 
 ---
 
@@ -611,6 +708,8 @@ This project is [MIT](LICENSE) licensed - use it anywhere, commercially or perso
 ## Documentation
 
 **Start here:** [**Getting Started Guide**](docs/GETTING_STARTED.md) - Everything you need in one place.
+
+**Architecture:** [**ARCHITECTURE.md**](ARCHITECTURE.md) - Comprehensive technical architecture documentation including directory structure, module overview, security controls, and diagrams.
 
 Additional reference documentation:
 

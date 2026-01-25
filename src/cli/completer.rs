@@ -1,5 +1,5 @@
-// Copyright (c) 2024-2025 Jesse Morgan
-// Licensed under the MIT License. See LICENSE file for details.
+// Copyright (c) 2024-2025 Jesse Morgan / Morgan Forge
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Tab completion and typeahead for rigrun CLI slash commands and @ mentions.
 //!
@@ -44,11 +44,19 @@
 //! ```
 
 use std::borrow::Cow;
+use std::sync::LazyLock;
+use regex::Regex;
 use rustyline::completion::{Completer, Pair};
 use rustyline::highlight::Highlighter;
 use rustyline::hint::{Hint, Hinter};
 use rustyline::validate::Validator;
 use rustyline::{Context, Helper, Result};
+
+// IL5: Static regex pattern for highlighting @ mentions
+static MENTION_HIGHLIGHT_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(@file:(?:"[^"]+"|'[^']+'|\S+)|@codebase|@git(?::\S+)?|@error|@clipboard)"#)
+        .expect("MENTION_HIGHLIGHT_PATTERN is a valid regex")
+});
 
 /// Information about a slash command.
 #[derive(Debug, Clone)]
@@ -314,18 +322,11 @@ impl RigrunCompleter {
 
     /// Highlight @ mentions in the input line.
     fn highlight_mentions(&self, line: &str) -> String {
-        use regex::Regex;
-
-        // Pattern to match @ mentions
-        // @file:path, @codebase, @git, @git:range, @error, @clipboard
-        let pattern = Regex::new(
-            r#"(@file:(?:"[^"]+"|'[^']+'|\S+)|@codebase|@git(?::\S+)?|@error|@clipboard)"#
-        ).unwrap();
-
+        // IL5: Use static pattern - never panic at runtime
         let mut result = String::new();
         let mut last_end = 0;
 
-        for cap in pattern.captures_iter(line) {
+        for cap in MENTION_HIGHLIGHT_PATTERN.captures_iter(line) {
             let m = cap.get(0).unwrap();
 
             // Add text before the match
