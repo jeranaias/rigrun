@@ -1093,24 +1093,26 @@ Then press ENTER to continue.
 func (i *Installer) viewModelDownload() string {
 	var s strings.Builder
 
-	s.WriteString(titleStyle.Render("  Choose Your AI Model"))
+	s.WriteString(titleStyle.Render("Choose Your AI Model"))
 	s.WriteString("\n\n")
 
-	s.WriteString(dimStyle.Render("  Select a model to download:\n\n"))
+	s.WriteString(dimStyle.Render("Select a model to download:"))
+	s.WriteString("\n\n")
 
+	// Build model list with consistent alignment
 	for idx, model := range i.models {
-		var line string
+		cursor := "  " // No cursor (2 spaces for alignment)
+		style := unselectedStyle
 		if idx == i.modelSelected {
-			line = selectedStyle.Render(fmt.Sprintf("  > %s", model))
-		} else {
-			line = unselectedStyle.Render(fmt.Sprintf("    %s", model))
+			cursor = "> " // Cursor takes same space
+			style = selectedStyle
 		}
-		s.WriteString(line)
+		s.WriteString(style.Render(fmt.Sprintf("  %s%s", cursor, model)))
 		s.WriteString("\n")
 	}
 
 	s.WriteString("\n")
-	s.WriteString(dimStyle.Render("  Use Up/Down to select, ENTER to confirm"))
+	s.WriteString(dimStyle.Render("Use ↑/↓ to select, ENTER to confirm"))
 
 	return i.center(s.String())
 }

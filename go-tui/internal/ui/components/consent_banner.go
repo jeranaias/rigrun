@@ -63,11 +63,15 @@ func (c *ConsentBanner) SetSize(width, height int) {
 		c.width = width
 		c.height = height
 		c.contentDirty = true
+
+		// Update viewport dimensions
+		c.viewport.Width = width
+		c.viewport.Height = height
+
+		// Rebuild viewport content for new size
+		c.rebuildViewportContent()
 	}
 
-	// Update viewport dimensions
-	c.viewport.Width = width
-	c.viewport.Height = height
 	c.ready = true
 }
 
@@ -176,70 +180,123 @@ func (c ConsentBanner) View() string {
 		height = 24
 	}
 
-	// ==========================================================================
-	// STYLING: Amber/Gold background for DoD consent banner
-	// ==========================================================================
+	// Amber background for entire screen
+	amberBg := lipgloss.Color("#1A1500")
+	bgStyle := lipgloss.NewStyle().
+		Background(amberBg).
+		Width(width).
+		Height(height)
+
+	// If we have pre-built content in viewport, use it (supports scrolling)
+	if c.needsScrolling && c.renderedContent != "" {
+		return bgStyle.Render(c.viewport.View())
+	}
+
+	// If content was pre-built but doesn't need scrolling, center it
+	if c.renderedContent != "" {
+		centered := lipgloss.Place(
+			width, height,
+			lipgloss.Center, lipgloss.Center,
+			c.renderedContent,
+			lipgloss.WithWhitespaceBackground(amberBg),
+		)
+		return bgStyle.Render(centered)
+	}
+
+	// Fallback: build content on the fly (shouldn't happen if SetSize was called)
+	content := c.buildBannerContent()
+	centered := lipgloss.Place(
+		width, height,
+		lipgloss.Center, lipgloss.Center,
+		content,
+		lipgloss.WithWhitespaceBackground(amberBg),
+	)
+	return bgStyle.Render(centered)
+}
+
+// updateContent rebuilds the rendered content and updates viewport if needed.
+// This should be called when dimensions change.
+func (c *ConsentBanner) updateContent() {
+	// This method is called to update the internal state
+	// The actual rendering happens in View()
+	c.contentDirty = false
+}
+
+// rebuildViewportContent rebuilds and sets the viewport content for scrolling.
+// This must be called from SetSize (pointer receiver) to persist viewport state.
+func (c *ConsentBanner) rebuildViewportContent() {
+	if c.width == 0 || c.height == 0 {
+		return
+	}
+
+	// Build the full consent banner content
+	content := c.buildBannerContent()
+	c.renderedContent = content
+
+	// Set viewport content - this persists because we're using pointer receiver
+	c.viewport.SetContent(content)
+
+	// Check if scrolling is needed
+	contentLines := strings.Count(content, "\n") + 1
+	c.needsScrolling = contentLines > c.height
+	c.contentDirty = false
+}
+
+// buildBannerContent builds the consent banner content string.
+func (c *ConsentBanner) buildBannerContent() string {
+	width := c.width
+	if width == 0 {
+		width = 80
+	}
+	height := c.height
+	if height == 0 {
+		height = 24
+	}
 
 	// Amber/Gold color scheme for consent banner
-	amberBg := lipgloss.Color("#1A1500")   // Dark amber background
-	amberFg := lipgloss.Color("#FFB000")   // Bright amber/gold text
-	redBorder := lipgloss.Color("#FF4444") // Red border for attention
+	amberBg := lipgloss.Color("#1A1500")
+	amberFg := lipgloss.Color("#FFB000")
+	redBorder := lipgloss.Color("#FF4444")
 
-	// ==========================================================================
-	// CALCULATE RESPONSIVE DIMENSIONS
-	// ==========================================================================
-
-	// Calculate content box dimensions with proper responsive sizing
-	// Minimum: 40 chars, Maximum: 76 chars, with 4 char margin on each side
+	// Calculate responsive dimensions
 	horizontalMargin := 4
 	if width < 50 {
-		horizontalMargin = 2 // Reduce margin on very small screens
+		horizontalMargin = 2
 	}
 	if width < 30 {
-		horizontalMargin = 1 // Minimal margin on tiny screens
+		horizontalMargin = 1
 	}
 
 	maxContentWidth := width - (horizontalMargin * 2)
 	if maxContentWidth > 76 {
-		maxContentWidth = 76 // Cap at reasonable maximum
+		maxContentWidth = 76
 	}
 	if maxContentWidth < 30 {
-		maxContentWidth = 30 // Minimum readable width
+		maxContentWidth = 30
 	}
 
-	// Inner content width (accounting for box padding and border)
-	innerWidth := maxContentWidth - 6 // 2 for border + 4 for padding (2 each side)
+	innerWidth := maxContentWidth - 6
 	if innerWidth < 20 {
 		innerWidth = 20
 	}
 
-	// ==========================================================================
-	// BUILD CONSENT BANNER TEXT
-	// ==========================================================================
-
-	// Get the DoD consent banner text from the CLI package
+	// Get the DoD consent banner text
 	bannerText := cli.DoDConsentBanner
 
-	// Clean up the banner text - remove the outer frame since we'll add our own
+	// Clean up the banner text
 	lines := strings.Split(bannerText, "\n")
 	var contentLines []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// Skip the frame lines (all = or empty)
 		if trimmed == "" || strings.HasPrefix(trimmed, "=") {
 			continue
 		}
 		contentLines = append(contentLines, line)
 	}
 
-	// Wrap text to fit content width
 	wrappedContent := wrapTextLines(contentLines, innerWidth)
 
-	// ==========================================================================
-	// RENDER BANNER CONTENT
-	// ==========================================================================
-
-	// Title style
+	// Styles
 	titleStyle := lipgloss.NewStyle().
 		Foreground(redBorder).
 		Background(amberBg).
@@ -247,14 +304,12 @@ func (c ConsentBanner) View() string {
 		Align(lipgloss.Center).
 		Width(innerWidth)
 
-	// Content text style
 	contentStyle := lipgloss.NewStyle().
 		Foreground(amberFg).
 		Background(amberBg).
 		Align(lipgloss.Left).
 		Width(innerWidth)
 
-	// Acknowledgment prompt style
 	promptStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(amberBg).
@@ -262,7 +317,6 @@ func (c ConsentBanner) View() string {
 		Align(lipgloss.Center).
 		Width(innerWidth)
 
-	// Hint style for ESC instruction
 	hintStyle := lipgloss.NewStyle().
 		Foreground(styles.TextMuted).
 		Background(amberBg).
@@ -270,7 +324,6 @@ func (c ConsentBanner) View() string {
 		Align(lipgloss.Center).
 		Width(innerWidth)
 
-	// Scroll hint style
 	scrollHintStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#888888")).
 		Background(amberBg).
@@ -278,16 +331,6 @@ func (c ConsentBanner) View() string {
 		Align(lipgloss.Center).
 		Width(innerWidth)
 
-	// Build content sections
-	var parts []string
-
-	// Title
-	parts = append(parts, "")
-	parts = append(parts, titleStyle.Render("U.S. GOVERNMENT INFORMATION SYSTEM"))
-	parts = append(parts, titleStyle.Render("DoD SYSTEM USE NOTIFICATION (AC-8)"))
-	parts = append(parts, "")
-
-	// Separator - use responsive width
 	separatorWidth := innerWidth - 2
 	if separatorWidth < 10 {
 		separatorWidth = 10
@@ -298,31 +341,34 @@ func (c ConsentBanner) View() string {
 		Background(amberBg).
 		Align(lipgloss.Center).
 		Width(innerWidth)
+
+	// Build content
+	var parts []string
+	parts = append(parts, "")
+	parts = append(parts, titleStyle.Render("U.S. GOVERNMENT INFORMATION SYSTEM"))
+	parts = append(parts, titleStyle.Render("DoD SYSTEM USE NOTIFICATION (AC-8)"))
+	parts = append(parts, "")
 	parts = append(parts, separatorStyle.Render(separator))
 	parts = append(parts, "")
-
-	// Main content
 	parts = append(parts, contentStyle.Render(wrappedContent))
 	parts = append(parts, "")
-
-	// Separator
 	parts = append(parts, separatorStyle.Render(separator))
 	parts = append(parts, "")
-
-	// Acknowledgment prompt
 	parts = append(parts, promptStyle.Render("Press ENTER or Y to acknowledge and continue"))
 	parts = append(parts, "")
 	parts = append(parts, hintStyle.Render("Press ESC to exit without acknowledging"))
 	parts = append(parts, "")
 
+	// Add scroll hint if needed
+	estimatedHeight := len(parts) + 10 // rough estimate with box padding
+	if estimatedHeight > height {
+		parts = append(parts, scrollHintStyle.Render("[Use Up/Down or PgUp/PgDn to scroll]"))
+		parts = append(parts, "")
+	}
+
 	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
 
-	// ==========================================================================
-	// CREATE FRAMED BOX
-	// ==========================================================================
-
-	// Box style with red border on amber background
-	// Use responsive padding based on available width
+	// Create box
 	horizontalPadding := 2
 	if width < 50 {
 		horizontalPadding = 1
@@ -338,65 +384,15 @@ func (c ConsentBanner) View() string {
 
 	box := boxStyle.Render(content)
 
-	// ==========================================================================
-	// HANDLE SCROLLING FOR SMALL WINDOWS
-	// ==========================================================================
-
-	// Count lines in the rendered box
-	boxLines := strings.Split(box, "\n")
-	boxHeight := len(boxLines)
-
-	// Check if content needs scrolling (with some margin for safety)
-	needsScrolling := boxHeight > (height - 2)
-
-	// Create amber background for the entire screen
-	bgStyle := lipgloss.NewStyle().
-		Background(amberBg).
-		Width(width).
-		Height(height)
-
-	if needsScrolling {
-		// Add scroll indicator at the bottom
-		scrollIndicator := scrollHintStyle.Render("[Use Up/Down or PgUp/PgDn to scroll]")
-		parts = append(parts, scrollIndicator)
-		content = lipgloss.JoinVertical(lipgloss.Center, parts...)
-		box = boxStyle.Render(content)
-
-		// Center the box horizontally within the viewport content
-		centeredBox := lipgloss.Place(
-			width, boxHeight+2, // Add some extra height for the scroll indicator
-			lipgloss.Center, lipgloss.Top,
-			box,
-			lipgloss.WithWhitespaceBackground(amberBg),
-		)
-
-		// Set viewport content - the viewport handles scrolling internally
-		c.viewport.SetContent(centeredBox)
-
-		return bgStyle.Render(c.viewport.View())
-	}
-
-	// ==========================================================================
-	// CENTER ON SCREEN (when content fits)
-	// ==========================================================================
-
-	// Center the box vertically and horizontally
+	// Center horizontally
 	centered := lipgloss.Place(
-		width, height,
-		lipgloss.Center, lipgloss.Center,
+		width, 0,
+		lipgloss.Center, lipgloss.Top,
 		box,
 		lipgloss.WithWhitespaceBackground(amberBg),
 	)
 
-	return bgStyle.Render(centered)
-}
-
-// updateContent rebuilds the rendered content and updates viewport if needed.
-// This should be called when dimensions change.
-func (c *ConsentBanner) updateContent() {
-	// This method is called to update the internal state
-	// The actual rendering happens in View()
-	c.contentDirty = false
+	return centered
 }
 
 // =============================================================================
