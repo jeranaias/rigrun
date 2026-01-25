@@ -543,7 +543,7 @@ func (i *Installer) checkRigrunBinary() bool {
 
 // downloadRigrunBinary downloads the rigrun binary from GitHub releases
 func (i *Installer) downloadRigrunBinary() error {
-	const repoOwner = "rigrun"
+	const repoOwner = "jeranaias"
 	const repoName = "rigrun"
 
 	// Determine the asset name based on OS and architecture
