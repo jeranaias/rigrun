@@ -15,8 +15,30 @@ rigrun is an AI coding assistant that runs **on your hardware first**. A beautif
 
 ---
 
+## ⚡ Quick Start
+
+**Two steps:**
+
+1. **Install Ollama** → [ollama.ai](https://ollama.ai) (one-click installer)
+2. **Install rigrun** → [Download](https://github.com/jeranaias/rigrun/releases/latest) and run
+
+```bash
+# Already have Go? One command:
+go install github.com/jeranaias/rigrun@latest
+
+# Then:
+rigrun
+```
+
+That's it. Type a question, get an answer. Your code never leaves your machine.
+
+→ [Full setup guide](#getting-started) | [Model recommendations](#recommended-models)
+
+---
+
 ## Table of Contents
 
+- [Quick Start](#-quick-start)
 - [The Problem](#the-problem)
 - [The Solution](#the-solution)
 - [Why rigrun Over Alternatives](#why-rigrun-over-the-alternatives)
