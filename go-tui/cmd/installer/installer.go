@@ -320,23 +320,11 @@ func (i *Installer) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if i.phase == PhaseModelDownload && i.modelSelected > 0 {
 			i.modelSelected--
 		}
-		if i.phase == PhaseComplete {
-			i.launchSelected = true
-		}
 		return i, nil
 
 	case "down", "j":
 		if i.phase == PhaseModelDownload && i.modelSelected < len(i.models)-1 {
 			i.modelSelected++
-		}
-		if i.phase == PhaseComplete {
-			i.launchSelected = false
-		}
-		return i, nil
-
-	case "tab":
-		if i.phase == PhaseComplete {
-			i.launchSelected = !i.launchSelected
 		}
 		return i, nil
 	}
@@ -374,9 +362,7 @@ func (i *Installer) handleSelect() (tea.Model, tea.Cmd) {
 		return i, nil
 
 	case PhaseComplete:
-		if i.launchSelected {
-			return i, i.launchRigrun()
-		}
+		// Just quit the installer
 		return i, tea.Quit
 	}
 
@@ -1298,89 +1284,27 @@ func (i *Installer) viewConfigSetup() string {
 func (i *Installer) viewComplete() string {
 	var s strings.Builder
 
-	// Success art
-	successArt := `
-    +------------------------------------------+
-    |                                          |
-    |      *** Installation Complete! ***      |
-    |                                          |
-    +------------------------------------------+
-`
-	s.WriteString(successStyle.Render(successArt))
-	s.WriteString("\n")
-
-	// Quick highlights
-	highlights := `
-  +-----------------------------------------------------+
-  |  What you just got:                                 |
-  |                                                     |
-  |  * Local-first AI      Sub-200ms responses         |
-  |  * Smart routing       Best of local & cloud       |
-  |  * 30fps streaming     Buttery smooth UI           |
-  |  * Vim mode            Your muscle memory works    |
-  |  * Cost tracking       Know where your money goes  |
-  |  * IL5 certified       DoD security built-in       |
-  +-----------------------------------------------------+
-`
-	s.WriteString(dimStyle.Render(highlights))
-	s.WriteString("\n")
+	s.WriteString(successStyle.Render("\n  Installation Complete!\n\n"))
 
 	// Show GPU info if detected
 	if i.gpuInfo != nil {
 		gpuStyle := lipgloss.NewStyle().Foreground(brandAccent).Bold(true)
 		s.WriteString(gpuStyle.Render(fmt.Sprintf("  GPU: %s (%dGB VRAM)\n", i.gpuInfo.Name, i.gpuInfo.VramGB)))
-
-		// Show environment variable info for RDNA4
 		if i.needsVulkan {
 			envStyle := lipgloss.NewStyle().Foreground(brandWarning)
-			s.WriteString(envStyle.Render("  RDNA4 detected - OLLAMA_VULKAN=1 configured\n"))
-			if runtime.GOOS == "windows" {
-				s.WriteString(dimStyle.Render("  (User environment variable set automatically)\n"))
-			} else {
-				s.WriteString(dimStyle.Render("  (Added to ~/.bashrc - restart terminal to apply)\n"))
-			}
+			s.WriteString(envStyle.Render("  OLLAMA_VULKAN=1 configured for RDNA4\n"))
 		}
 		s.WriteString("\n")
 	}
 
-	// Two options with selection indicator
-	s.WriteString("  Choose your next step:\n\n")
+	// Simple instructions
+	s.WriteString(highlightStyle.Render("  To start rigrun, run:\n\n"))
+	s.WriteString(lipgloss.NewStyle().Foreground(brandSecondary).Bold(true).Render("    rigrun\n\n"))
 
-	// Option 1: Launch rigrun now
-	launch := "  Launch rigrun now"
-	if i.launchSelected {
-		s.WriteString(selectedStyle.Render("  > " + launch))
-		s.WriteString(highlightStyle.Render("  <- Opens a new terminal with rigrun"))
-	} else {
-		s.WriteString(unselectedStyle.Render("    " + launch))
-	}
-	s.WriteString("\n\n")
+	s.WriteString(dimStyle.Render(fmt.Sprintf("  Config: %s\n", filepath.Join(i.configPath, "config.toml"))))
 
-	// Option 2: Close
-	closeText := "  Close installer"
-	if !i.launchSelected {
-		s.WriteString(selectedStyle.Render("  > " + closeText))
-		s.WriteString(dimStyle.Render("  <- You can run 'rigrun' anytime"))
-	} else {
-		s.WriteString(unselectedStyle.Render("    " + closeText))
-	}
-	s.WriteString("\n\n")
-
-	// Navigation help
-	s.WriteString(dimStyle.Render("  Up/Down or Tab to select  |  Enter to confirm"))
-	s.WriteString("\n\n")
-
-	// Config paths
-	s.WriteString(dimStyle.Render(fmt.Sprintf("  Config: %s", filepath.Join(i.configPath, "config.toml"))))
-
-	// Show GPU env script path if created
-	if len(i.gpuEnvVars) > 0 {
-		if runtime.GOOS == "windows" {
-			s.WriteString(dimStyle.Render(fmt.Sprintf("\n  GPU env: %s", filepath.Join(i.configPath, "gpu_env.bat"))))
-		} else {
-			s.WriteString(dimStyle.Render(fmt.Sprintf("\n  GPU env: %s", filepath.Join(i.configPath, "gpu_env.sh"))))
-		}
-	}
+	s.WriteString("\n")
+	s.WriteString(dimStyle.Render("  Press ENTER to close"))
 
 	return i.center(s.String())
 }

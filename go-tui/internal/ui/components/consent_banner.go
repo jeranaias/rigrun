@@ -229,21 +229,25 @@ func (c *ConsentBanner) rebuildViewportContent() {
 		return
 	}
 
-	// Build the full consent banner content
-	content := c.buildBannerContent()
-	c.renderedContent = content
+	// Build the full consent banner content (styled)
+	styledContent := c.buildBannerContent()
+	c.renderedContent = styledContent
 
-	// Check if scrolling is needed (reserve 1 line for scroll indicator)
-	contentLines := strings.Count(content, "\n") + 1
-	c.needsScrolling = contentLines > (c.height - 1)
+	// Check if scrolling is needed (reserve 2 lines for scroll indicator)
+	contentLines := strings.Count(styledContent, "\n") + 1
+	c.needsScrolling = contentLines > (c.height - 2)
 
 	if c.needsScrolling {
+		// For scrolling, use simple plain text content (no box styling)
+		// The viewport doesn't handle complex ANSI styling well
+		simpleContent := c.buildSimpleContent()
+
 		// Set viewport dimensions (leave room for scroll indicator)
 		c.viewport.Width = c.width
-		c.viewport.Height = c.height - 1
+		c.viewport.Height = c.height - 2
 
-		// Set viewport content
-		c.viewport.SetContent(content)
+		// Set viewport content with simple styling
+		c.viewport.SetContent(simpleContent)
 
 		// Explicitly start at top (YOffset = 0)
 		c.viewport.GotoTop()
@@ -251,6 +255,53 @@ func (c *ConsentBanner) rebuildViewportContent() {
 	}
 
 	c.contentDirty = false
+}
+
+// buildSimpleContent builds a simple scrollable version of the consent banner.
+func (c *ConsentBanner) buildSimpleContent() string {
+	amberFg := lipgloss.Color("#FFB000")
+	redFg := lipgloss.Color("#FF4444")
+
+	titleStyle := lipgloss.NewStyle().Foreground(redFg).Bold(true)
+	textStyle := lipgloss.NewStyle().Foreground(amberFg)
+	promptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
+
+	var sb strings.Builder
+
+	sb.WriteString(titleStyle.Render("═══════════════════════════════════════════════════════════════"))
+	sb.WriteString("\n")
+	sb.WriteString(titleStyle.Render("           U.S. GOVERNMENT INFORMATION SYSTEM"))
+	sb.WriteString("\n")
+	sb.WriteString(titleStyle.Render("        DoD SYSTEM USE NOTIFICATION (AC-8)"))
+	sb.WriteString("\n")
+	sb.WriteString(titleStyle.Render("═══════════════════════════════════════════════════════════════"))
+	sb.WriteString("\n\n")
+
+	// Get the banner text and wrap it
+	bannerText := cli.DoDConsentBanner
+	lines := strings.Split(bannerText, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			sb.WriteString("\n")
+			continue
+		}
+		if strings.HasPrefix(trimmed, "=") {
+			continue // Skip separator lines
+		}
+		sb.WriteString(textStyle.Render(trimmed))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(titleStyle.Render("═══════════════════════════════════════════════════════════════"))
+	sb.WriteString("\n\n")
+	sb.WriteString(promptStyle.Render("        Press ENTER or Y to acknowledge and continue"))
+	sb.WriteString("\n")
+	sb.WriteString(textStyle.Render("              Press ESC to exit without acknowledging"))
+	sb.WriteString("\n")
+
+	return sb.String()
 }
 
 // buildBannerContent builds the consent banner content string.
