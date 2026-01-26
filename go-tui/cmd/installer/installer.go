@@ -320,11 +320,17 @@ func (i *Installer) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if i.phase == PhaseModelDownload && i.modelSelected > 0 {
 			i.modelSelected--
 		}
+		if i.phase == PhaseComplete {
+			i.launchSelected = true
+		}
 		return i, nil
 
 	case "down", "j":
 		if i.phase == PhaseModelDownload && i.modelSelected < len(i.models)-1 {
 			i.modelSelected++
+		}
+		if i.phase == PhaseComplete {
+			i.launchSelected = false
 		}
 		return i, nil
 	}
@@ -362,7 +368,9 @@ func (i *Installer) handleSelect() (tea.Model, tea.Cmd) {
 		return i, nil
 
 	case PhaseComplete:
-		// Just quit the installer
+		if i.launchSelected {
+			return i, i.launchRigrun()
+		}
 		return i, tea.Quit
 	}
 
@@ -1289,22 +1297,24 @@ func (i *Installer) viewComplete() string {
 	// Show GPU info if detected
 	if i.gpuInfo != nil {
 		gpuStyle := lipgloss.NewStyle().Foreground(brandAccent).Bold(true)
-		s.WriteString(gpuStyle.Render(fmt.Sprintf("  GPU: %s (%dGB VRAM)\n", i.gpuInfo.Name, i.gpuInfo.VramGB)))
+		s.WriteString(gpuStyle.Render(fmt.Sprintf("  GPU: %s (%dGB VRAM)", i.gpuInfo.Name, i.gpuInfo.VramGB)))
 		if i.needsVulkan {
-			envStyle := lipgloss.NewStyle().Foreground(brandWarning)
-			s.WriteString(envStyle.Render("  OLLAMA_VULKAN=1 configured for RDNA4\n"))
+			s.WriteString(lipgloss.NewStyle().Foreground(brandWarning).Render(" [OLLAMA_VULKAN=1]"))
 		}
-		s.WriteString("\n")
+		s.WriteString("\n\n")
 	}
 
-	// Simple instructions
-	s.WriteString(highlightStyle.Render("  To start rigrun, run:\n\n"))
-	s.WriteString(lipgloss.NewStyle().Foreground(brandSecondary).Bold(true).Render("    rigrun\n\n"))
-
-	s.WriteString(dimStyle.Render(fmt.Sprintf("  Config: %s\n", filepath.Join(i.configPath, "config.toml"))))
+	// Launch options
+	if i.launchSelected {
+		s.WriteString(selectedStyle.Render("  > Launch rigrun now\n"))
+		s.WriteString(unselectedStyle.Render("    Exit\n"))
+	} else {
+		s.WriteString(unselectedStyle.Render("    Launch rigrun now\n"))
+		s.WriteString(selectedStyle.Render("  > Exit\n"))
+	}
 
 	s.WriteString("\n")
-	s.WriteString(dimStyle.Render("  Press ENTER to close"))
+	s.WriteString(dimStyle.Render("  Up/Down to select, Enter to confirm"))
 
 	return i.center(s.String())
 }
