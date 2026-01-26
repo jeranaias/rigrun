@@ -247,11 +247,8 @@ func (c *ConsentBanner) rebuildViewportContent() {
 		c.viewport.Height = c.height - 2
 
 		// Set viewport content with simple styling
+		// Note: SetContent() internally resets scroll position to top
 		c.viewport.SetContent(simpleContent)
-
-		// Explicitly start at top (YOffset = 0)
-		c.viewport.GotoTop()
-		c.viewport.SetYOffset(0)
 	}
 
 	c.contentDirty = false

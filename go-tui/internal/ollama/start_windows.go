@@ -87,6 +87,10 @@ func (c *Client) startOllamaProcess(ctx context.Context) error {
 	// Create the command with "serve" argument
 	cmd := exec.Command(ollamaPath, "serve")
 
+	// CRITICAL: Pass environment variables to the child process
+	// This ensures OLLAMA_VULKAN=1 and other GPU-related vars reach Ollama
+	cmd.Env = os.Environ()
+
 	// Set Windows-specific process attributes for background execution:
 	// - CREATE_NEW_PROCESS_GROUP: Creates a new process group (allows independent termination)
 	// - CREATE_NO_WINDOW: Prevents a console window from appearing

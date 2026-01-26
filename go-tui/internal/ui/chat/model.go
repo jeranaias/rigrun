@@ -56,9 +56,8 @@ type Model struct {
 	theme *styles.Theme
 
 	// Dimensions
-	width      int
-	height     int
-	lastResize time.Time // For resize debouncing
+	width  int
+	height int
 
 	// Conversation
 	conversation *model.Conversation
@@ -518,19 +517,8 @@ func (m Model) View() string {
 // =============================================================================
 
 func (m Model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
-	// Resize debouncing: Only apply resize after 100ms of stability
-	// This prevents render storms during window drag operations
-	now := time.Now()
-	if !m.lastResize.IsZero() && now.Sub(m.lastResize) < 100*time.Millisecond {
-		// Too soon after last resize - schedule a delayed resize check
-		m.lastResize = now
-		return m, func() tea.Msg {
-			time.Sleep(100 * time.Millisecond)
-			return msg
-		}
-	}
-	m.lastResize = now
-
+	// Apply resize immediately - Bubble Tea handles resize events efficiently
+	// and debouncing with time.Sleep causes UI freezes during window drag
 	m.width = msg.Width
 	m.height = msg.Height
 
