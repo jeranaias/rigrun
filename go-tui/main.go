@@ -689,6 +689,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StreamErrorMsg:
 		return m.handleStreamError(msg)
 
+	case chat.StreamTickMsg:
+		// Forward streaming tick to chat model for buffer flush
+		newChatModel, cmd := m.chatModel.Update(msg)
+		m.chatModel = newChatModel.(chat.Model)
+		return m, cmd
+
 	case RoutingFallbackMsg:
 		return m.handleRoutingFallback(msg)
 

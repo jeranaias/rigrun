@@ -8,6 +8,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -182,36 +183,38 @@ func (c ConsentBanner) View() string {
 
 	// Amber background for entire screen
 	amberBg := lipgloss.Color("#1A1500")
-	bgStyle := lipgloss.NewStyle().
-		Background(amberBg).
-		Width(width).
-		Height(height)
 
-	// If we have pre-built content in viewport, use it (supports scrolling)
-	if c.needsScrolling && c.renderedContent != "" {
-		return bgStyle.Render(c.viewport.View())
-	}
+	// Use viewport for scrolling - it contains the full content
+	if c.ready && c.needsScrolling {
+		// Viewport handles the scrolling, we just need to fill the screen with amber
+		viewportContent := c.viewport.View()
 
-	// If content was pre-built but doesn't need scrolling, center it
-	if c.renderedContent != "" {
-		centered := lipgloss.Place(
-			width, height,
-			lipgloss.Center, lipgloss.Center,
-			c.renderedContent,
-			lipgloss.WithWhitespaceBackground(amberBg),
+		// Add scroll position indicator
+		scrollInfo := fmt.Sprintf(" [%d%%] Use ↑↓ to scroll, ENTER to accept ",
+			int(c.viewport.ScrollPercent()*100))
+		scrollStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#888888")).
+			Background(amberBg)
+
+		return lipgloss.JoinVertical(lipgloss.Left,
+			viewportContent,
+			scrollStyle.Render(scrollInfo),
 		)
-		return bgStyle.Render(centered)
 	}
 
-	// Fallback: build content on the fly (shouldn't happen if SetSize was called)
-	content := c.buildBannerContent()
+	// Content fits - center it on screen
+	content := c.renderedContent
+	if content == "" {
+		content = c.buildBannerContent()
+	}
+
 	centered := lipgloss.Place(
 		width, height,
 		lipgloss.Center, lipgloss.Center,
 		content,
 		lipgloss.WithWhitespaceBackground(amberBg),
 	)
-	return bgStyle.Render(centered)
+	return centered
 }
 
 // updateContent rebuilds the rendered content and updates viewport if needed.
@@ -233,12 +236,22 @@ func (c *ConsentBanner) rebuildViewportContent() {
 	content := c.buildBannerContent()
 	c.renderedContent = content
 
-	// Set viewport content - this persists because we're using pointer receiver
-	c.viewport.SetContent(content)
-
-	// Check if scrolling is needed
+	// Check if scrolling is needed (reserve 1 line for scroll indicator)
 	contentLines := strings.Count(content, "\n") + 1
-	c.needsScrolling = contentLines > c.height
+	c.needsScrolling = contentLines > (c.height - 1)
+
+	if c.needsScrolling {
+		// Set viewport dimensions (leave room for scroll indicator)
+		c.viewport.Width = c.width
+		c.viewport.Height = c.height - 1
+
+		// Set viewport content
+		c.viewport.SetContent(content)
+
+		// Start at top
+		c.viewport.GotoTop()
+	}
+
 	c.contentDirty = false
 }
 
