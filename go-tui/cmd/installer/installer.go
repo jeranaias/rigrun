@@ -646,8 +646,12 @@ func (i *Installer) downloadRigrunBinary() error {
 	var assetURL string
 	var assetName string
 
-	// Look for matching asset (e.g., rigrun_Darwin_arm64.tar.gz or rigrun_Windows_x86_64.zip)
+	// Look for matching asset (e.g., rigrun_Darwin_arm64.tar.gz or rigrun_Windows_x86_64.exe)
+	// Skip installer assets - we want the main rigrun binary
 	for _, asset := range release.Assets {
+		if strings.Contains(asset.Name, "installer") {
+			continue // Skip installer binaries
+		}
 		if strings.Contains(asset.Name, osName) && strings.Contains(asset.Name, archName) {
 			assetURL = asset.BrowserDownloadURL
 			assetName = asset.Name
