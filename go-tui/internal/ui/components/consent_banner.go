@@ -114,15 +114,12 @@ func (c ConsentBanner) Update(msg tea.Msg) (ConsentBanner, tea.Cmd) {
 		// Mark dirty and update size
 		if c.width != msg.Width || c.height != msg.Height {
 			c.contentDirty = true
+			c.width = msg.Width
+			c.height = msg.Height
+			// Rebuild viewport content for new size and reset to top
+			c.rebuildViewportContent()
 		}
-		c.width = msg.Width
-		c.height = msg.Height
-		c.viewport.Width = msg.Width
-		c.viewport.Height = msg.Height
 		c.ready = true
-
-		// Recalculate if scrolling is needed based on new dimensions
-		c.needsScrolling = c.calculateNeedsScrolling()
 
 	case tea.KeyMsg:
 		// Always handle scrolling keys - they're harmless when not needed
@@ -248,8 +245,9 @@ func (c *ConsentBanner) rebuildViewportContent() {
 		// Set viewport content
 		c.viewport.SetContent(content)
 
-		// Start at top
+		// Explicitly start at top (YOffset = 0)
 		c.viewport.GotoTop()
+		c.viewport.SetYOffset(0)
 	}
 
 	c.contentDirty = false

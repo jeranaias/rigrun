@@ -1037,11 +1037,12 @@ func (i *Installer) launchRigrun() tea.Cmd {
 		case "windows":
 			// Windows: Open Windows Terminal or cmd.exe with rigrun
 			// Try Windows Terminal first (wt), fallback to cmd
+			// Use larger window size to fit consent banner (100x50)
 			if _, err := exec.LookPath("wt"); err == nil {
-				cmd = exec.Command("wt", "new-tab", "--title", "rigrun", rigrunPath)
+				cmd = exec.Command("wt", "new-tab", "--title", "rigrun", "--size", "100,50", rigrunPath)
 			} else {
-				// Use cmd.exe with /K to keep window open
-				cmd = exec.Command("cmd", "/C", "start", "rigrun", "cmd", "/K", rigrunPath)
+				// Use cmd.exe with /K to keep window open, set mode for larger size
+				cmd = exec.Command("cmd", "/C", "start", "rigrun", "/MAX", "cmd", "/K", rigrunPath)
 			}
 
 		case "darwin":
@@ -1341,16 +1342,6 @@ func (i *Installer) viewComplete() string {
 		}
 		s.WriteString("\n")
 	}
-
-	// Rocket art
-	rocketSmall := `
-          *
-         /|\
-        /_|_\
-          |
-`
-	s.WriteString(lipgloss.NewStyle().Foreground(brandSecondary).Render(rocketSmall))
-	s.WriteString("\n")
 
 	// Two options with selection indicator
 	s.WriteString("  Choose your next step:\n\n")
