@@ -232,6 +232,11 @@ type installCompleteMsg struct {
 	error   string
 }
 
+type ollamaInstallMsg struct {
+	success bool
+	message string
+}
+
 // Update handles messages
 func (i *Installer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -302,6 +307,21 @@ func (i *Installer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			i.error = msg.error
 		}
 		return i, nil
+
+	case ollamaInstallMsg:
+		if msg.success {
+			// Re-run the Ollama check
+			i.checks[3] = CheckResult{Name: "Ollama Service", Status: "checking", Message: "Verifying..."}
+			return i, i.runCheck(3)
+		} else {
+			i.checks[3] = CheckResult{
+				Name:    "Ollama Service",
+				Status:  "fail",
+				Message: msg.message,
+				Fix:     "Install manually from https://ollama.ai",
+			}
+		}
+		return i, nil
 	}
 
 	return i, nil
@@ -331,6 +351,13 @@ func (i *Installer) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if i.phase == PhaseComplete {
 			i.launchSelected = false
+		}
+		return i, nil
+
+	case "i":
+		// Install Ollama if not found
+		if i.phase == PhaseSystemCheck && !i.ollamaFound {
+			return i, i.installOllama()
 		}
 		return i, nil
 	}
@@ -499,32 +526,96 @@ func (i *Installer) checkGPU() CheckResult {
 }
 
 func (i *Installer) checkOllama() CheckResult {
-	_, err := exec.LookPath("ollama")
+	ollamaPath, err := exec.LookPath("ollama")
 	if err != nil {
-		return CheckResult{
-			Name:    "Ollama Service",
-			Status:  "fail",
-			Message: "Ollama not installed",
-			Fix:     "Visit https://ollama.ai to install",
+		// Ollama not in PATH - check common install locations
+		if runtime.GOOS == "windows" {
+			localAppData := os.Getenv("LOCALAPPDATA")
+			if localAppData != "" {
+				testPath := filepath.Join(localAppData, "Programs", "Ollama", "ollama.exe")
+				if _, err := os.Stat(testPath); err == nil {
+					ollamaPath = testPath
+				}
+			}
+		}
+		if ollamaPath == "" {
+			return CheckResult{
+				Name:    "Ollama Service",
+				Status:  "fail",
+				Message: "Ollama not installed",
+				Fix:     "Press 'i' to install Ollama",
+			}
 		}
 	}
 
-	// Check if Ollama is running
-	out, err := exec.Command("ollama", "list").Output()
-	if err != nil {
-		return CheckResult{
-			Name:    "Ollama Service",
-			Status:  "warn",
-			Message: "Ollama installed but not running",
-			Fix:     "Run: ollama serve",
-		}
-	}
-
-	models := strings.Count(string(out), "\n")
+	// Ollama binary exists - that's all we need
+	// Don't try to run 'ollama list' as it hangs if server isn't running
+	// rigrun will start the server automatically when needed
 	return CheckResult{
 		Name:    "Ollama Service",
 		Status:  "pass",
-		Message: fmt.Sprintf("Running with %d models", models),
+		Message: fmt.Sprintf("Found at %s", filepath.Base(ollamaPath)),
+	}
+}
+
+// installOllama downloads and runs the Ollama installer
+func (i *Installer) installOllama() tea.Cmd {
+	return func() tea.Msg {
+		// Update status to show we're installing
+		i.checks[3] = CheckResult{
+			Name:    "Ollama Service",
+			Status:  "checking",
+			Message: "Installing Ollama...",
+		}
+
+		if runtime.GOOS == "windows" {
+			// Download Ollama installer for Windows
+			installerURL := "https://ollama.com/download/OllamaSetup.exe"
+			tmpFile, err := os.CreateTemp("", "OllamaSetup-*.exe")
+			if err != nil {
+				return ollamaInstallMsg{success: false, message: "Failed to create temp file"}
+			}
+			tmpPath := tmpFile.Name()
+			defer os.Remove(tmpPath)
+
+			resp, err := http.Get(installerURL)
+			if err != nil {
+				tmpFile.Close()
+				return ollamaInstallMsg{success: false, message: "Failed to download Ollama"}
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				tmpFile.Close()
+				return ollamaInstallMsg{success: false, message: fmt.Sprintf("Download failed: HTTP %d", resp.StatusCode)}
+			}
+
+			_, err = io.Copy(tmpFile, resp.Body)
+			tmpFile.Close()
+			if err != nil {
+				return ollamaInstallMsg{success: false, message: "Failed to save installer"}
+			}
+
+			// Run the installer silently
+			cmd := exec.Command(tmpPath, "/S")
+			err = cmd.Run()
+			if err != nil {
+				// Try running without silent flag (may need user interaction)
+				cmd = exec.Command(tmpPath)
+				err = cmd.Run()
+				if err != nil {
+					return ollamaInstallMsg{success: false, message: "Installer failed"}
+				}
+			}
+
+			// Wait a moment for installation to complete
+			time.Sleep(2 * time.Second)
+
+			return ollamaInstallMsg{success: true, message: "Ollama installed"}
+		}
+
+		// For non-Windows, provide instructions
+		return ollamaInstallMsg{success: false, message: "Run: curl -fsSL https://ollama.com/install.sh | sh"}
 	}
 }
 
