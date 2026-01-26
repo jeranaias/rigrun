@@ -958,15 +958,34 @@ func (i *Installer) runInstall() tea.Cmd {
 		if i.modelSelected < len(i.models)-1 && i.ollamaFound {
 			modelName := strings.Split(i.models[i.modelSelected], " ")[0]
 
-			// Run ollama pull and wait for completion
-			cmd := exec.Command("ollama", "pull", modelName)
-			// Capture output for debugging but don't fail install if pull fails
-			output, err := cmd.CombinedOutput()
-			if err != nil {
-				// Model pull failed - log but continue (user can pull manually)
-				// The config is already set up, rigrun will prompt to download
-				_ = output // Silence unused variable
+			// Start Ollama server if not running (ollama pull needs the server)
+			// Check if server is running by trying to list models
+			checkCmd := exec.Command("ollama", "list")
+			if err := checkCmd.Run(); err != nil {
+				// Server not running - start it in background
+				if runtime.GOOS == "windows" {
+					// On Windows, start ollama serve in background
+					startCmd := exec.Command("cmd", "/C", "start", "/B", "ollama", "serve")
+					startCmd.Start()
+				} else {
+					startCmd := exec.Command("ollama", "serve")
+					startCmd.Start()
+				}
+				// Wait for server to be ready
+				for attempt := 0; attempt < 30; attempt++ {
+					time.Sleep(500 * time.Millisecond)
+					testCmd := exec.Command("ollama", "list")
+					if testCmd.Run() == nil {
+						break
+					}
+				}
 			}
+
+			// Now pull the model - this will block until download completes
+			cmd := exec.Command("ollama", "pull", modelName)
+			cmd.Stdout = os.Stdout // Show progress
+			cmd.Stderr = os.Stderr
+			cmd.Run() // Block until complete
 		}
 
 		return installCompleteMsg{success: true}
