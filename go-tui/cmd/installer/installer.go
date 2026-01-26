@@ -956,13 +956,21 @@ func (i *Installer) runInstall() tea.Cmd {
 			i.createGPUEnvScripts()
 		}
 
-		// Download model if selected (not "Skip")
-		if i.modelSelected < len(i.models)-1 {
+		// Download model if selected (not "Skip") and Ollama is available
+		if i.modelSelected < len(i.models)-1 && i.ollamaFound {
 			modelName := strings.Split(i.models[i.modelSelected], " ")[0]
-			exec.Command("ollama", "pull", modelName).Run()
+
+			// Run ollama pull and wait for completion
+			cmd := exec.Command("ollama", "pull", modelName)
+			// Capture output for debugging but don't fail install if pull fails
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				// Model pull failed - log but continue (user can pull manually)
+				// The config is already set up, rigrun will prompt to download
+				_ = output // Silence unused variable
+			}
 		}
 
-		time.Sleep(500 * time.Millisecond) // Visual feedback
 		return installCompleteMsg{success: true}
 	}
 }

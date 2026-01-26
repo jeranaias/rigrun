@@ -311,10 +311,10 @@ func runTUI(args cli.Args) {
 	}
 
 	// Create the Bubble Tea program
+	// Note: Mouse capture disabled to allow normal terminal text selection/copy
 	p := tea.NewProgram(
 		m,
-		tea.WithAltScreen(),       // Use alternate screen buffer
-		tea.WithMouseCellMotion(), // Enable mouse support
+		tea.WithAltScreen(), // Use alternate screen buffer
 	)
 
 	// Store program reference for async operations

@@ -43,10 +43,10 @@ func main() {
 	}
 
 	// Create and run the TUI installer
+	// Mouse capture disabled to allow terminal text selection/copy
 	p := tea.NewProgram(
 		NewInstaller(),
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
 	)
 
 	if _, err := p.Run(); err != nil {

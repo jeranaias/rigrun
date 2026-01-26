@@ -1264,6 +1264,30 @@ func (m Model) handleStreamComplete(msg StreamCompleteMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m Model) handleStreamError(msg StreamErrorMsg) (tea.Model, tea.Cmd) {
+	// Check if this is a model not found error and we can fallback to cloud
+	if ollama.IsModelNotFound(msg.Error) && m.HasCloudClient() {
+		// Add a system message about the fallback
+		m.conversation.AddSystemMessage(fmt.Sprintf(
+			"Local model not found. Routing to cloud instead. To download the model, run: ollama pull %s",
+			m.modelName,
+		))
+
+		// Re-route to cloud
+		m.currentQueryTier = router.TierCloud
+		m.state = StateReady
+		m.isThinking = false
+		m.streamingMsgID = ""
+		m.streamingStats = nil
+		m.clearCancelFunc()
+
+		// Update viewport and focus input
+		m.updateViewport()
+		m.input.Focus()
+
+		// The user can re-submit their query - don't auto-retry to avoid confusion
+		return m, nil
+	}
+
 	m.state = StateError
 	m.isThinking = false
 	m.streamingMsgID = ""
