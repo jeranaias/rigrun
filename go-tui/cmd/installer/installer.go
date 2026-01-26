@@ -917,13 +917,11 @@ func copyFile(src, dst string) error {
 // runInstall performs the actual installation
 func (i *Installer) runInstall() tea.Cmd {
 	return func() tea.Msg {
-		// Check and download rigrun binary if not present
-		if !i.checkRigrunBinary() {
-			if err := i.downloadRigrunBinary(); err != nil {
-				// Non-fatal: user can build from source or download manually
-				// Just log the error but continue with config setup
-				_ = err
-			}
+		// Always download latest rigrun binary to ensure up-to-date version
+		if err := i.downloadRigrunBinary(); err != nil {
+			// Non-fatal: user can build from source or download manually
+			// Just log the error but continue with config setup
+			_ = err
 		}
 
 		// Create config directory
