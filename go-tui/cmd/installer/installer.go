@@ -192,8 +192,8 @@ func NewInstaller() *Installer {
 			"llama3.1:8b (General purpose)",
 			"Skip model download",
 		},
-		configPath:     filepath.Join(homeDir, ".rigrun"),
-		installPath:    filepath.Join(homeDir, ".local", "bin"),
+		configPath:  filepath.Join(homeDir, ".rigrun"),
+		installPath: filepath.Join(homeDir, ".rigrun", "bin"),
 		launchSelected: true, // Default to "Launch rigrun now"
 		gpuEnvVars:     make(map[string]string),
 	}
@@ -355,8 +355,8 @@ func (i *Installer) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return i, nil
 
 	case "i":
-		// Install Ollama if not found
-		if i.phase == PhaseSystemCheck && !i.ollamaFound {
+		// Install Ollama if not found - works in both system check and ollama setup phases
+		if (i.phase == PhaseSystemCheck || i.phase == PhaseOllamaSetup) && !i.ollamaFound {
 			return i, i.installOllama()
 		}
 		return i, nil
@@ -919,9 +919,7 @@ func (i *Installer) runInstall() tea.Cmd {
 	return func() tea.Msg {
 		// Always download latest rigrun binary to ensure up-to-date version
 		if err := i.downloadRigrunBinary(); err != nil {
-			// Non-fatal: user can build from source or download manually
-			// Just log the error but continue with config setup
-			_ = err
+			return installCompleteMsg{success: false, error: fmt.Sprintf("Failed to download rigrun: %v", err)}
 		}
 
 		// Create config directory
@@ -1343,23 +1341,42 @@ func (i *Installer) viewOllamaSetup() string {
 	s.WriteString(titleStyle.Render("  Ollama Setup Required"))
 	s.WriteString("\n\n")
 
-	content := `
+	var content string
+	if runtime.GOOS == "windows" {
+		content = `
 Ollama is required to run local AI models.
 
-Please install Ollama from:
+` + highlightStyle.Render("Press 'i' to install Ollama automatically") + `
+
+Or install manually from:
 
   ` + highlightStyle.Render("https://ollama.ai") + `
 
-After installing, run:
-
-  ` + highlightStyle.Render("ollama serve") + `
-
-Then press ENTER to continue.
+Press ENTER to skip and continue without local models.
 `
+	} else {
+		content = `
+Ollama is required to run local AI models.
+
+Install with:
+
+  ` + highlightStyle.Render("curl -fsSL https://ollama.com/install.sh | sh") + `
+
+Or download from:
+
+  ` + highlightStyle.Render("https://ollama.ai") + `
+
+Press ENTER to continue when ready.
+`
+	}
 
 	s.WriteString(boxStyle.Render(content))
 	s.WriteString("\n\n")
-	s.WriteString(highlightStyle.Render("  Press ENTER when Ollama is ready"))
+	if runtime.GOOS == "windows" {
+		s.WriteString(highlightStyle.Render("  Press 'i' to install Ollama, ENTER to skip"))
+	} else {
+		s.WriteString(highlightStyle.Render("  Press ENTER when Ollama is installed"))
+	}
 
 	return i.center(s.String())
 }
