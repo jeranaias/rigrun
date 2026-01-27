@@ -186,10 +186,10 @@ func NewInstaller() *Installer {
 			{Name: "Disk Space", Status: "checking"},
 		},
 		models: []string{
-			"qwen2.5-coder:7b (Recommended - Fast & capable)",
-			"qwen2.5-coder:14b (Best quality)",
-			"codestral:22b (Excellent for code)",
-			"llama3.1:8b (General purpose)",
+			"qwen2.5-coder:7b (~4.7GB) - Recommended, fast & capable",
+			"qwen2.5-coder:14b (~9GB) - Best quality",
+			"codestral:22b (~13GB) - Excellent for code",
+			"llama3.1:8b (~4.7GB) - General purpose",
 			"Skip model download",
 		},
 		configPath:  filepath.Join(homeDir, ".rigrun"),
@@ -235,6 +235,11 @@ type installCompleteMsg struct {
 type ollamaInstallMsg struct {
 	success bool
 	message string
+}
+
+// modelDownloadCompleteMsg signals model download finished
+type modelDownloadCompleteMsg struct {
+	err error
 }
 
 // Update handles messages
@@ -322,6 +327,13 @@ func (i *Installer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return i, nil
+
+	case modelDownloadCompleteMsg:
+		// Model download finished, continue with install
+		if msg.err != nil {
+			i.error = fmt.Sprintf("Model download failed: %v", msg.err)
+		}
+		return i, i.runInstall()
 	}
 
 	return i, nil
@@ -387,6 +399,12 @@ func (i *Installer) handleSelect() (tea.Model, tea.Cmd) {
 		return i, nil
 
 	case PhaseModelDownload:
+		// If a model is selected (not "Skip") and Ollama is available, download it first
+		if i.modelSelected < len(i.models)-1 && i.ollamaFound {
+			i.phase = PhaseConfigSetup
+			return i, i.downloadModel()
+		}
+		// Skip model download, go directly to install
 		i.phase = PhaseConfigSetup
 		return i, i.runInstall()
 
@@ -620,42 +638,78 @@ func (i *Installer) installOllama() tea.Cmd {
 }
 
 func (i *Installer) checkNetwork() CheckResult {
-	// Simple check - try to resolve a hostname
-	_, err := exec.Command("ping", "-c", "1", "-W", "2", "ollama.ai").Output()
-	if runtime.GOOS == "windows" {
-		_, err = exec.Command("ping", "-n", "1", "-w", "2000", "ollama.ai").Output()
+	// Check network connectivity by attempting HTTP HEAD requests to essential services
+	client := &http.Client{
+		Timeout: 5 * time.Second,
 	}
 
-	if err != nil {
-		return CheckResult{
-			Name:    "Network Access",
-			Status:  "warn",
-			Message: "Limited connectivity (offline mode available)",
+	// Try to reach ollama.com first, then github.com as fallback
+	endpoints := []string{
+		"https://ollama.com",
+		"https://github.com",
+	}
+
+	for _, endpoint := range endpoints {
+		req, err := http.NewRequest("HEAD", endpoint, nil)
+		if err != nil {
+			continue
+		}
+
+		resp, err := client.Do(req)
+		if err == nil {
+			resp.Body.Close()
+			return CheckResult{
+				Name:    "Network Access",
+				Status:  "pass",
+				Message: "Connected",
+			}
 		}
 	}
+
 	return CheckResult{
 		Name:    "Network Access",
-		Status:  "pass",
-		Message: "Connected",
+		Status:  "warn",
+		Message: "Limited connectivity (offline mode available)",
 	}
 }
 
 func (i *Installer) checkDisk() CheckResult {
-	// Check available disk space (simplified)
-	homeDir, _ := os.UserHomeDir()
-	var stat struct {
-		Bavail uint64
-		Bsize  int64
+	// Check available disk space - require at least 10GB for model downloads
+	const requiredSpaceGB = 10
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return CheckResult{
+			Name:    "Disk Space",
+			Status:  "warn",
+			Message: "Could not determine home directory",
+		}
 	}
 
-	// This is a simplified check - real implementation would use syscall
-	_ = homeDir
-	_ = stat
+	freeBytes, err := getFreeDiskSpace(homeDir)
+	if err != nil {
+		return CheckResult{
+			Name:    "Disk Space",
+			Status:  "warn",
+			Message: "Could not check disk space",
+		}
+	}
+
+	freeGB := freeBytes / (1024 * 1024 * 1024)
+
+	if freeGB < requiredSpaceGB {
+		return CheckResult{
+			Name:    "Disk Space",
+			Status:  "fail",
+			Message: fmt.Sprintf("Only %dGB free (need %dGB)", freeGB, requiredSpaceGB),
+			Fix:     "Free up disk space for model downloads",
+		}
+	}
 
 	return CheckResult{
 		Name:    "Disk Space",
 		Status:  "pass",
-		Message: "Sufficient space available",
+		Message: fmt.Sprintf("%dGB available", freeGB),
 	}
 }
 
@@ -914,6 +968,41 @@ func copyFile(src, dst string) error {
 	return err
 }
 
+// downloadModel uses tea.ExecProcess to run ollama pull with visible output
+func (i *Installer) downloadModel() tea.Cmd {
+	modelName := strings.Split(i.models[i.modelSelected], " ")[0]
+
+	// First ensure Ollama server is running
+	// Check if server is running by trying to list models
+	checkCmd := exec.Command("ollama", "list")
+	if err := checkCmd.Run(); err != nil {
+		// Server not running - start it in background
+		if runtime.GOOS == "windows" {
+			startCmd := exec.Command("cmd", "/C", "start", "/B", "ollama", "serve")
+			startCmd.Start()
+		} else {
+			startCmd := exec.Command("ollama", "serve")
+			startCmd.Start()
+		}
+		// Wait for server to be ready
+		for attempt := 0; attempt < 30; attempt++ {
+			time.Sleep(500 * time.Millisecond)
+			testCmd := exec.Command("ollama", "list")
+			if testCmd.Run() == nil {
+				break
+			}
+		}
+	}
+
+	// Create the command to pull the model
+	cmd := exec.Command("ollama", "pull", modelName)
+
+	// Use tea.ExecProcess to temporarily exit altscreen and show the command output
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		return modelDownloadCompleteMsg{err: err}
+	})
+}
+
 // runInstall performs the actual installation
 func (i *Installer) runInstall() tea.Cmd {
 	return func() tea.Msg {
@@ -952,39 +1041,8 @@ func (i *Installer) runInstall() tea.Cmd {
 			i.createGPUEnvScripts()
 		}
 
-		// Download model if selected (not "Skip") and Ollama is available
-		if i.modelSelected < len(i.models)-1 && i.ollamaFound {
-			modelName := strings.Split(i.models[i.modelSelected], " ")[0]
-
-			// Start Ollama server if not running (ollama pull needs the server)
-			// Check if server is running by trying to list models
-			checkCmd := exec.Command("ollama", "list")
-			if err := checkCmd.Run(); err != nil {
-				// Server not running - start it in background
-				if runtime.GOOS == "windows" {
-					// On Windows, start ollama serve in background
-					startCmd := exec.Command("cmd", "/C", "start", "/B", "ollama", "serve")
-					startCmd.Start()
-				} else {
-					startCmd := exec.Command("ollama", "serve")
-					startCmd.Start()
-				}
-				// Wait for server to be ready
-				for attempt := 0; attempt < 30; attempt++ {
-					time.Sleep(500 * time.Millisecond)
-					testCmd := exec.Command("ollama", "list")
-					if testCmd.Run() == nil {
-						break
-					}
-				}
-			}
-
-			// Now pull the model - this will block until download completes
-			cmd := exec.Command("ollama", "pull", modelName)
-			cmd.Stdout = os.Stdout // Show progress
-			cmd.Stderr = os.Stderr
-			cmd.Run() // Block until complete
-		}
+		// Model download is handled separately via downloadModel() using tea.ExecProcess
+		// which exits altscreen to show download progress
 
 		return installCompleteMsg{success: true}
 	}

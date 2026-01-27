@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/jeranaias/rigrun-tui/internal/model"
 )
 
@@ -154,6 +155,16 @@ func formatCost(cents float64) string {
 	}
 	// Convert to dollars for larger amounts
 	return "$" + formatFloat64(cents/100.0)
+}
+
+// =============================================================================
+// CLIPBOARD UTILITIES
+// =============================================================================
+
+// copyToClipboard copies the given text to the system clipboard.
+// Returns an error if the clipboard is not available or the operation fails.
+func copyToClipboard(text string) error {
+	return clipboard.WriteAll(text)
 }
 
 // =============================================================================

@@ -142,6 +142,8 @@ func GetHelpItems() []HelpItem {
 		{"Home/g, End/G", "Top/bottom"},
 		{"Enter", "Send message"},
 		{"C-c", "Cancel streaming"},
+		{"C-y", "Copy last response"},
+		{"C-p", "Command palette"},
 		{"C-q", "Quit (emergency exit)"},
 		{"C-l", "Clear screen"},
 		{"C-k", "Multi-line mode"},

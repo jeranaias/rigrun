@@ -24,9 +24,11 @@
 
 | Platform | Download |
 |----------|----------|
-| **Windows** | [rigrun-installer.exe](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-installer.exe) |
-| **macOS** | [rigrun-installer-darwin](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-installer-darwin) |
-| **Linux** | [rigrun-installer-linux](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-installer-linux) |
+| **Windows** | [rigrun-installer_Windows_x86_64.exe](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun-installer_Windows_x86_64.exe) |
+| **macOS (Apple Silicon)** | [rigrun-installer_Darwin_arm64](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun-installer_Darwin_arm64) |
+| **macOS (Intel)** | [rigrun-installer_Darwin_x86_64](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun-installer_Darwin_x86_64) |
+| **Linux (x86_64)** | [rigrun-installer_Linux_x86_64](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun-installer_Linux_x86_64) |
+| **Linux (ARM64)** | [rigrun-installer_Linux_arm64](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun-installer_Linux_arm64) |
 
 The installer is a beautiful, guided experience that:
 - ✦ Checks your system requirements
@@ -62,7 +64,7 @@ iwr -useb https://rigrun.dev/install.ps1 | iex
 ### Homebrew (macOS)
 
 ```bash
-brew tap jeranaias/rigrun
+brew tap morganforgetech/rigrun
 brew install rigrun
 ```
 
@@ -88,8 +90,8 @@ All in under 60 seconds.
 
 ```bash
 # Clone the repository
-git clone https://github.com/jeranaias/rigrun-tui.git
-cd rigrun-tui
+git clone https://github.com/morganforgetech/rigrun.git
+cd rigrun
 
 # Build
 go build -o rigrun .
@@ -103,15 +105,15 @@ mkdir -p ~/.rigrun
 
 ### Pre-built Binaries
 
-Download from [Releases](https://github.com/jeranaias/rigrun-tui/releases):
+Download from [Releases](https://github.com/morganforgetech/rigrun/releases):
 
 | Platform | Architecture | Download |
 |----------|--------------|----------|
-| macOS    | Apple Silicon | [rigrun-darwin-arm64.tar.gz](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-darwin-arm64.tar.gz) |
-| macOS    | Intel | [rigrun-darwin-amd64.tar.gz](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-darwin-amd64.tar.gz) |
-| Linux    | x86_64 | [rigrun-linux-amd64.tar.gz](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-linux-amd64.tar.gz) |
-| Linux    | ARM64 | [rigrun-linux-arm64.tar.gz](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-linux-arm64.tar.gz) |
-| Windows  | x86_64 | [rigrun-windows-amd64.zip](https://github.com/jeranaias/rigrun-tui/releases/latest/download/rigrun-windows-amd64.zip) |
+| macOS    | Apple Silicon | [rigrun_Darwin_arm64.tar.gz](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun_Darwin_arm64.tar.gz) |
+| macOS    | Intel | [rigrun_Darwin_x86_64.tar.gz](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun_Darwin_x86_64.tar.gz) |
+| Linux    | x86_64 | [rigrun_Linux_x86_64.tar.gz](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun_Linux_x86_64.tar.gz) |
+| Linux    | ARM64 | [rigrun_Linux_arm64.tar.gz](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun_Linux_arm64.tar.gz) |
+| Windows  | x86_64 | [rigrun_Windows_x86_64.zip](https://github.com/morganforgetech/rigrun/releases/latest/download/rigrun_Windows_x86_64.zip) |
 
 ---
 
@@ -243,7 +245,7 @@ ollama pull qwen2.5-coder:7b
 
 - Run `rigrun doctor` for diagnostics
 - Check [FAQ](docs/faq.md)
-- Open an [issue](https://github.com/jeranaias/rigrun-tui/issues)
+- Open an [issue](https://github.com/morganforgetech/rigrun/issues)
 
 ---
 

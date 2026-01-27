@@ -717,6 +717,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cycleRoutingMode()
 		return m, nil
 
+	case "ctrl+y":
+		// Copy last assistant response to clipboard
+		return m.copyLastResponse()
+
 	case "?":
 		// Toggle help overlay (only when not typing)
 		if !m.inputMode || m.input.Value() == "" {
@@ -1709,6 +1713,55 @@ func (m *Model) cycleRoutingMode() {
 	}
 	m.conversation.AddSystemMessage("Routing mode: " + modeDisplay)
 	m.updateViewport()
+}
+
+// copyLastResponse copies the last assistant response to the clipboard.
+// Returns the model and a command (nil on success, or error handling).
+func (m Model) copyLastResponse() (tea.Model, tea.Cmd) {
+	// Find the last assistant message
+	if m.conversation == nil {
+		m.statusMsg = "No conversation to copy from"
+		return m, nil
+	}
+
+	messages := m.conversation.GetHistory()
+	var lastAssistantMsg *model.Message
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == model.RoleAssistant {
+			lastAssistantMsg = messages[i]
+			break
+		}
+	}
+
+	if lastAssistantMsg == nil || lastAssistantMsg.Content == "" {
+		m.statusMsg = "No response to copy"
+		m.conversation.AddSystemMessage("No assistant response to copy")
+		m.updateViewport()
+		return m, nil
+	}
+
+	// Copy to clipboard using atotto/clipboard
+	err := copyToClipboard(lastAssistantMsg.Content)
+	if err != nil {
+		m.statusMsg = "Failed to copy"
+		m.conversation.AddSystemMessage("Failed to copy to clipboard: " + err.Error())
+		m.updateViewport()
+		return m, nil
+	}
+
+	// Show success feedback
+	contentLen := len(lastAssistantMsg.Content)
+	var sizeInfo string
+	if contentLen < 1000 {
+		sizeInfo = fmt.Sprintf("%d chars", contentLen)
+	} else {
+		sizeInfo = fmt.Sprintf("%.1fK chars", float64(contentLen)/1000)
+	}
+	m.statusMsg = "Copied!"
+	m.conversation.AddSystemMessage("Copied response to clipboard (" + sizeInfo + ")")
+	m.updateViewport()
+
+	return m, nil
 }
 
 // GetRoutingMode returns the current routing mode.

@@ -16,12 +16,18 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/jeranaias/rigrun-tui/internal/cli"
-	"github.com/jeranaias/rigrun-tui/internal/ui/styles"
 )
 
 // =============================================================================
 // CONSENT BANNER COMPONENT (IL5 AC-8 Compliance)
 // =============================================================================
+
+// Minimum terminal size constants
+const (
+	minTerminalWidth  = 40
+	minTerminalHeight = 12
+	footerHeight      = 4 // Lines reserved for the fixed footer
+)
 
 // ConsentBanner is the DoD System Use Notification consent banner component.
 // This component displays the standard USG warning text and requires explicit
@@ -165,9 +171,102 @@ func (c *ConsentBanner) calculateNeedsScrolling() bool {
 	return estimatedContentHeight > c.height
 }
 
+// isTooSmall checks if the terminal is too small to display the consent banner.
+func (c ConsentBanner) isTooSmall() bool {
+	return c.width < minTerminalWidth || c.height < minTerminalHeight
+}
+
+// renderTooSmallMessage renders a message asking the user to resize the terminal.
+func (c ConsentBanner) renderTooSmallMessage() string {
+	amberBg := lipgloss.Color("#1A1500")
+	amberFg := lipgloss.Color("#FFB000")
+	redFg := lipgloss.Color("#FF4444")
+
+	warningStyle := lipgloss.NewStyle().
+		Foreground(redFg).
+		Background(amberBg).
+		Bold(true).
+		Align(lipgloss.Center)
+
+	messageStyle := lipgloss.NewStyle().
+		Foreground(amberFg).
+		Background(amberBg).
+		Align(lipgloss.Center)
+
+	hintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		Background(amberBg).
+		Italic(true).
+		Align(lipgloss.Center)
+
+	var parts []string
+	parts = append(parts, warningStyle.Render("TERMINAL TOO SMALL"))
+	parts = append(parts, "")
+	parts = append(parts, messageStyle.Render("Please resize your"))
+	parts = append(parts, messageStyle.Render("terminal window."))
+	parts = append(parts, "")
+	parts = append(parts, hintStyle.Render(fmt.Sprintf("Min: %dx%d", minTerminalWidth, minTerminalHeight)))
+	parts = append(parts, hintStyle.Render(fmt.Sprintf("Now: %dx%d", c.width, c.height)))
+
+	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
+
+	return lipgloss.Place(
+		c.width, c.height,
+		lipgloss.Center, lipgloss.Center,
+		content,
+		lipgloss.WithWhitespaceBackground(amberBg),
+	)
+}
+
+// renderFooter renders the fixed footer with controls.
+func (c ConsentBanner) renderFooter() string {
+	amberBg := lipgloss.Color("#1A1500")
+	amberFg := lipgloss.Color("#FFB000")
+
+	separatorStyle := lipgloss.NewStyle().
+		Foreground(amberFg).
+		Background(amberBg)
+
+	controlsStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(amberBg).
+		Bold(true).
+		Align(lipgloss.Center).
+		Width(c.width)
+
+	hintStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888")).
+		Background(amberBg).
+		Align(lipgloss.Center).
+		Width(c.width)
+
+	// Build separator line
+	separatorWidth := c.width - 4
+	if separatorWidth < 10 {
+		separatorWidth = 10
+	}
+	separator := strings.Repeat("─", separatorWidth)
+
+	var parts []string
+	parts = append(parts, separatorStyle.Render(separator))
+
+	// Show scroll indicator if scrolling is enabled
+	if c.needsScrolling {
+		scrollPercent := int(c.viewport.ScrollPercent() * 100)
+		scrollInfo := fmt.Sprintf("↑/↓ scroll [%d%%]  •  ENTER/Y accept  •  ESC quit", scrollPercent)
+		parts = append(parts, controlsStyle.Render(scrollInfo))
+	} else {
+		parts = append(parts, controlsStyle.Render("ENTER/Y to accept  •  ESC to quit"))
+	}
+	parts = append(parts, hintStyle.Render("U.S. Government System - Authorized Use Only"))
+
+	return lipgloss.JoinVertical(lipgloss.Center, parts...)
+}
+
 // View renders the consent banner as a full-screen amber/gold display.
 // The banner adapts to window size and supports scrolling when content
-// exceeds the available height.
+// exceeds the available height. Controls are displayed in a fixed footer
+// that is always visible at the bottom of the screen.
 func (c ConsentBanner) View() string {
 	width := c.width
 	if width == 0 {
@@ -178,40 +277,56 @@ func (c ConsentBanner) View() string {
 		height = 24
 	}
 
+	// Check for minimum terminal size
+	if c.isTooSmall() {
+		return c.renderTooSmallMessage()
+	}
+
 	// Amber background for entire screen
 	amberBg := lipgloss.Color("#1A1500")
 
+	// Render the fixed footer
+	footer := c.renderFooter()
+	footerLines := strings.Count(footer, "\n") + 1
+
+	// Calculate available height for content (excluding footer)
+	contentHeight := height - footerLines
+
 	// Use viewport for scrolling - it contains the full content
 	if c.ready && c.needsScrolling {
-		// Viewport handles the scrolling, we just need to fill the screen with amber
+		// Viewport handles the scrolling
 		viewportContent := c.viewport.View()
 
-		// Add scroll position indicator
-		scrollInfo := fmt.Sprintf(" [%d%%] Use ↑↓ to scroll, ENTER to accept ",
-			int(c.viewport.ScrollPercent()*100))
-		scrollStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#888888")).
-			Background(amberBg)
+		// Pad viewport content to fill the content area
+		viewportLines := strings.Count(viewportContent, "\n") + 1
+		if viewportLines < contentHeight {
+			padding := strings.Repeat("\n", contentHeight-viewportLines)
+			viewportContent = viewportContent + padding
+		}
 
 		return lipgloss.JoinVertical(lipgloss.Left,
 			viewportContent,
-			scrollStyle.Render(scrollInfo),
+			footer,
 		)
 	}
 
-	// Content fits - center it on screen
+	// Content fits - center it in the content area (above footer)
 	content := c.renderedContent
 	if content == "" {
 		content = c.buildBannerContent()
 	}
 
 	centered := lipgloss.Place(
-		width, height,
+		width, contentHeight,
 		lipgloss.Center, lipgloss.Center,
 		content,
 		lipgloss.WithWhitespaceBackground(amberBg),
 	)
-	return centered
+
+	return lipgloss.JoinVertical(lipgloss.Left,
+		centered,
+		footer,
+	)
 }
 
 // updateContent rebuilds the rendered content and updates viewport if needed.
@@ -233,18 +348,19 @@ func (c *ConsentBanner) rebuildViewportContent() {
 	styledContent := c.buildBannerContent()
 	c.renderedContent = styledContent
 
-	// Check if scrolling is needed (reserve 2 lines for scroll indicator)
+	// Check if scrolling is needed (reserve footerHeight lines for fixed footer)
 	contentLines := strings.Count(styledContent, "\n") + 1
-	c.needsScrolling = contentLines > (c.height - 2)
+	availableHeight := c.height - footerHeight
+	c.needsScrolling = contentLines > availableHeight
 
 	if c.needsScrolling {
 		// For scrolling, use simple plain text content (no box styling)
 		// The viewport doesn't handle complex ANSI styling well
 		simpleContent := c.buildSimpleContent()
 
-		// Set viewport dimensions (leave room for scroll indicator)
+		// Set viewport dimensions (leave room for fixed footer)
 		c.viewport.Width = c.width
-		c.viewport.Height = c.height - 2
+		c.viewport.Height = availableHeight
 
 		// Set viewport content with simple styling
 		// Note: SetContent() internally resets scroll position to top
@@ -255,13 +371,13 @@ func (c *ConsentBanner) rebuildViewportContent() {
 }
 
 // buildSimpleContent builds a simple scrollable version of the consent banner.
+// Note: Control instructions are displayed in the fixed footer, not here.
 func (c *ConsentBanner) buildSimpleContent() string {
 	amberFg := lipgloss.Color("#FFB000")
 	redFg := lipgloss.Color("#FF4444")
 
 	titleStyle := lipgloss.NewStyle().Foreground(redFg).Bold(true)
 	textStyle := lipgloss.NewStyle().Foreground(amberFg)
-	promptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF")).Bold(true)
 
 	var sb strings.Builder
 
@@ -292,10 +408,6 @@ func (c *ConsentBanner) buildSimpleContent() string {
 
 	sb.WriteString("\n")
 	sb.WriteString(titleStyle.Render("═══════════════════════════════════════════════════════════════"))
-	sb.WriteString("\n\n")
-	sb.WriteString(promptStyle.Render("        Press ENTER or Y to acknowledge and continue"))
-	sb.WriteString("\n")
-	sb.WriteString(textStyle.Render("              Press ESC to exit without acknowledging"))
 	sb.WriteString("\n")
 
 	return sb.String()
@@ -356,6 +468,7 @@ func (c *ConsentBanner) buildBannerContent() string {
 	wrappedContent := wrapTextLines(contentLines, innerWidth)
 
 	// Styles
+	// Note: Control instructions are displayed in the fixed footer, not in this content
 	titleStyle := lipgloss.NewStyle().
 		Foreground(redBorder).
 		Background(amberBg).
@@ -369,27 +482,6 @@ func (c *ConsentBanner) buildBannerContent() string {
 		Align(lipgloss.Left).
 		Width(innerWidth)
 
-	promptStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(amberBg).
-		Bold(true).
-		Align(lipgloss.Center).
-		Width(innerWidth)
-
-	hintStyle := lipgloss.NewStyle().
-		Foreground(styles.TextMuted).
-		Background(amberBg).
-		Italic(true).
-		Align(lipgloss.Center).
-		Width(innerWidth)
-
-	scrollHintStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888")).
-		Background(amberBg).
-		Italic(true).
-		Align(lipgloss.Center).
-		Width(innerWidth)
-
 	separatorWidth := innerWidth - 2
 	if separatorWidth < 10 {
 		separatorWidth = 10
@@ -401,7 +493,7 @@ func (c *ConsentBanner) buildBannerContent() string {
 		Align(lipgloss.Center).
 		Width(innerWidth)
 
-	// Build content
+	// Build content (controls are in fixed footer)
 	var parts []string
 	parts = append(parts, "")
 	parts = append(parts, titleStyle.Render("U.S. GOVERNMENT INFORMATION SYSTEM"))
@@ -413,17 +505,6 @@ func (c *ConsentBanner) buildBannerContent() string {
 	parts = append(parts, "")
 	parts = append(parts, separatorStyle.Render(separator))
 	parts = append(parts, "")
-	parts = append(parts, promptStyle.Render("Press ENTER or Y to acknowledge and continue"))
-	parts = append(parts, "")
-	parts = append(parts, hintStyle.Render("Press ESC to exit without acknowledging"))
-	parts = append(parts, "")
-
-	// Add scroll hint if needed
-	estimatedHeight := len(parts) + 10 // rough estimate with box padding
-	if estimatedHeight > height {
-		parts = append(parts, scrollHintStyle.Render("[Use Up/Down or PgUp/PgDn to scroll]"))
-		parts = append(parts, "")
-	}
 
 	content := lipgloss.JoinVertical(lipgloss.Center, parts...)
 

@@ -908,26 +908,126 @@ func (m *Model) renderStreamingIndicator() string {
 	return streamingStyle.Render(spinner) + " " + text + dots
 }
 
-// renderEmptyState renders the empty conversation state.
+// renderEmptyState renders the empty conversation state with a welcoming interface.
+// Shows: welcome message, current model, quick tips, example prompts, and help hint.
 func (m *Model) renderEmptyState() string {
 	width := m.width
 	if width <= 0 {
 		width = 80
 	}
-	emptyWidth := width - 4
-	if emptyWidth < 10 {
-		emptyWidth = 10 // Absolute minimum
+	emptyWidth := width - 8
+	if emptyWidth < 40 {
+		emptyWidth = 40 // Minimum for readable content
 	}
-	if emptyWidth > width-2 {
-		emptyWidth = width - 2 // Never exceed terminal
+	if emptyWidth > 80 {
+		emptyWidth = 80 // Cap width for readability
 	}
 
-	style := lipgloss.NewStyle().
-		Foreground(styles.TextMuted).
+	var sb strings.Builder
+
+	// Welcome header with model name
+	welcomeStyle := lipgloss.NewStyle().
+		Foreground(styles.Purple).
+		Bold(true).
 		Align(lipgloss.Center).
 		Width(emptyWidth)
+	sb.WriteString(welcomeStyle.Render("Welcome to rigrun"))
+	sb.WriteString("\n\n")
 
-	return style.Render("Start a conversation by typing a message below.\n\nType /help to see available commands.")
+	// Current model info
+	modelStyle := lipgloss.NewStyle().
+		Foreground(styles.TextSecondary).
+		Align(lipgloss.Center).
+		Width(emptyWidth)
+	modelName := m.modelName
+	if modelName == "" {
+		modelName = "No model selected"
+	}
+	sb.WriteString(modelStyle.Render("Model: " + modelName))
+	sb.WriteString("\n\n")
+
+	// Separator
+	sepStyle := lipgloss.NewStyle().
+		Foreground(styles.Overlay).
+		Align(lipgloss.Center).
+		Width(emptyWidth)
+	sb.WriteString(sepStyle.Render(strings.Repeat("-", 40)))
+	sb.WriteString("\n\n")
+
+	// Quick tips section
+	tipsHeaderStyle := lipgloss.NewStyle().
+		Foreground(styles.Cyan).
+		Bold(true)
+	sb.WriteString(tipsHeaderStyle.Render("Quick Tips"))
+	sb.WriteString("\n\n")
+
+	tipStyle := lipgloss.NewStyle().
+		Foreground(styles.TextMuted)
+	keyStyle := lipgloss.NewStyle().
+		Foreground(styles.Amber).
+		Bold(true)
+
+	tips := []struct {
+		key  string
+		desc string
+	}{
+		{"Type a message", "Start chatting with the AI"},
+		{"?", "Show keyboard shortcuts"},
+		{"/help", "List available commands"},
+		{"Ctrl+P", "Open command palette"},
+		{"Ctrl+R", "Cycle routing mode (local/cloud/auto)"},
+		{"@file:path", "Include file content in your message"},
+	}
+
+	for _, tip := range tips {
+		line := fmt.Sprintf("  %s  %s",
+			keyStyle.Render(fmt.Sprintf("%-16s", tip.key)),
+			tipStyle.Render(tip.desc))
+		sb.WriteString(line)
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+
+	// Example prompts section
+	examplesHeaderStyle := lipgloss.NewStyle().
+		Foreground(styles.Emerald).
+		Bold(true)
+	sb.WriteString(examplesHeaderStyle.Render("Try asking"))
+	sb.WriteString("\n\n")
+
+	exampleStyle := lipgloss.NewStyle().
+		Foreground(styles.TextSecondary).
+		Italic(true)
+
+	examples := []string{
+		"\"Explain how goroutines work in Go\"",
+		"\"Write a function to parse JSON\"",
+		"\"Help me debug this error: @error\"",
+		"\"Review this file: @file:main.go\"",
+	}
+
+	for _, example := range examples {
+		sb.WriteString("  " + exampleStyle.Render(example))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("\n")
+
+	// Help hint at bottom
+	hintStyle := lipgloss.NewStyle().
+		Foreground(styles.Overlay).
+		Align(lipgloss.Center).
+		Width(emptyWidth)
+	sb.WriteString(hintStyle.Render("Press ? for help | Ctrl+Q to quit"))
+
+	// Wrap everything in a centered container
+	containerStyle := lipgloss.NewStyle().
+		Align(lipgloss.Center).
+		Width(width - 4).
+		Padding(2, 0)
+
+	return containerStyle.Render(sb.String())
 }
 
 // =============================================================================
@@ -1161,8 +1261,9 @@ func (m Model) renderStatusBar() string {
 	contextBarCompact := m.renderContextBarCompact()
 	contextBarFull := m.renderContextBarWithTier()
 	contextCostInfo := m.renderContextCostInfo()
-	shortcutsShort := lipgloss.NewStyle().Foreground(styles.TextMuted).Render("^C")
-	shortcutsFull := lipgloss.NewStyle().Foreground(styles.TextMuted).Render("^R=mode | ^C=stop")
+	// Help hint styled to be subtle but noticeable - always show in some form
+	shortcutsShort := lipgloss.NewStyle().Foreground(styles.TextMuted).Render("? | ^C")
+	shortcutsFull := lipgloss.NewStyle().Foreground(styles.TextMuted).Render("?=help | ^R=mode | ^C=stop")
 
 	// Helper function to build and measure status bar with given components
 	buildStatusBar := func(modelName string, showFullMode, showTokens, showCost, showSaved, useFullContext, showContextCost, useFullShortcuts bool) (left, right string, totalWidth int) {
