@@ -128,8 +128,17 @@ var SyntaxBuiltin = lipgloss.AdaptiveColor{Light: "#D20F39", Dark: "#F38BA8"}   
 var GradientStart = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"} // Purple
 var GradientEnd = lipgloss.AdaptiveColor{Light: "#0891B2", Dark: "#22D3EE"}   // Cyan
 
-// Focus ring color
-var FocusRing = Cyan
+// Focus ring color - bright cyan/blue for focused elements (following lazygit's ActiveBorderColor pattern)
+var FocusRing = lipgloss.AdaptiveColor{Light: "#0891B2", Dark: "#22D3EE"}
+
+// FocusRingDim - subtle border for unfocused elements (following lazygit's InactiveBorderColor pattern)
+var FocusRingDim = lipgloss.AdaptiveColor{Light: "#9CA3AF", Dark: "#45475A"}
+
+// FocusRingInsert - green for insert mode (vim-style: green = editing)
+var FocusRingInsert = lipgloss.AdaptiveColor{Light: "#059669", Dark: "#34D399"}
+
+// FocusRingCommand - amber for command mode (vim-style: amber = command input)
+var FocusRingCommand = lipgloss.AdaptiveColor{Light: "#D97706", Dark: "#FBBF24"}
 
 // Selection highlight
 var SelectionBg = lipgloss.AdaptiveColor{Light: "#BFDBFE", Dark: "#1E3A5F"}

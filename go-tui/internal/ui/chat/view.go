@@ -168,7 +168,98 @@ func (m Model) renderChat() string {
 		)
 	}
 
+	// Render non-blocking error toasts as overlay (lazygit-inspired)
+	// Toasts appear in bottom-right corner and don't block UI interaction
+	if m.HasToasts() {
+		toasts := m.GetToasts()
+		toastOverlay := components.RenderToastStack(toasts, m.width, m.height)
+		// Overlay toasts on the base view
+		return m.overlayToasts(baseView, toastOverlay)
+	}
+
 	return baseView
+}
+
+// overlayToasts renders toasts on top of the base view.
+// Toasts are positioned in the bottom-right corner without blocking interaction.
+func (m Model) overlayToasts(baseView, toastView string) string {
+	// Split base view into lines
+	baseLines := strings.Split(baseView, "\n")
+	toastLines := strings.Split(toastView, "\n")
+
+	// Calculate toast dimensions
+	toastHeight := len(toastLines)
+	toastWidth := 0
+	for _, line := range toastLines {
+		if w := lipgloss.Width(line); w > toastWidth {
+			toastWidth = w
+		}
+	}
+
+	// Overlay toast in bottom-right corner
+	// Start overlaying from (height - toastHeight - 2) to leave space for status bar
+	startRow := m.height - toastHeight - 2
+	if startRow < 0 {
+		startRow = 0
+	}
+
+	// Build the result by overlaying toast lines on base lines
+	result := make([]string, len(baseLines))
+	for i, baseLine := range baseLines {
+		toastLineIdx := i - startRow
+		if toastLineIdx >= 0 && toastLineIdx < len(toastLines) {
+			// This row has toast content - position it to the right
+			toastLine := toastLines[toastLineIdx]
+			if lipgloss.Width(toastLine) > 0 {
+				baseWidth := lipgloss.Width(baseLine)
+				toastLineWidth := lipgloss.Width(toastLine)
+
+				// Pad base line to full width if needed
+				if baseWidth < m.width-toastLineWidth-1 {
+					baseLine = baseLine + strings.Repeat(" ", m.width-toastLineWidth-1-baseWidth)
+				}
+
+				// Truncate base line to make room for toast
+				if baseWidth > m.width-toastLineWidth-1 {
+					// Need to truncate - find where to cut
+					cutPoint := m.width - toastLineWidth - 1
+					if cutPoint > 0 {
+						baseLine = truncateToWidth(baseLine, cutPoint)
+					}
+				}
+
+				// Combine base and toast
+				result[i] = baseLine + toastLine
+			} else {
+				result[i] = baseLine
+			}
+		} else {
+			result[i] = baseLine
+		}
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// truncateToWidth truncates a string to fit within a given visible width.
+func truncateToWidth(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+
+	currentWidth := 0
+	var result strings.Builder
+
+	for _, r := range s {
+		runeWidth := lipgloss.Width(string(r))
+		if currentWidth+runeWidth > width {
+			break
+		}
+		result.WriteRune(r)
+		currentWidth += runeWidth
+	}
+
+	return result.String()
 }
 
 // renderSearchBar renders the search input bar with match count and navigation hints.
@@ -1034,17 +1125,103 @@ func (m *Model) renderEmptyState() string {
 // INPUT AREA
 // =============================================================================
 
-// renderInput renders the input area.
+// renderInput renders the input area with focus ring indicator.
+// The border color changes based on vim mode following lazygit's focus styling pattern:
+// - Insert mode: bright green border (active editing)
+// - Normal mode: dim gray border (navigation mode)
+// - Command mode: amber border (command input)
+// This provides clear visual feedback about the current editing mode.
 func (m Model) renderInput() string {
 	width := m.width
 	if width <= 0 {
 		width = 80
 	}
 
-	// Single separator line at top
-	sep := lipgloss.NewStyle().
-		Foreground(styles.Overlay).
-		Render(strings.Repeat("-", width))
+	// Determine focus state and border color based on vim mode
+	var borderColor lipgloss.AdaptiveColor
+	var modeLabel string
+	var modeLabelStyle lipgloss.Style
+
+	if m.vimHandler != nil && m.vimHandler.Enabled() {
+		switch m.vimHandler.Mode() {
+		case VimModeInsert:
+			// Insert mode: bright green border - user is actively typing
+			borderColor = styles.FocusRingInsert
+			modeLabel = " INSERT "
+			modeLabelStyle = lipgloss.NewStyle().
+				Background(styles.FocusRingInsert).
+				Foreground(styles.TextInverse).
+				Bold(true)
+		case VimModeNormal:
+			// Normal mode: dim border - user is navigating
+			borderColor = styles.FocusRingDim
+			modeLabel = " NORMAL "
+			modeLabelStyle = lipgloss.NewStyle().
+				Background(styles.FocusRingDim).
+				Foreground(styles.TextInverse).
+				Bold(true)
+		case VimModeVisual:
+			// Visual mode: purple border - selection
+			borderColor = styles.Purple
+			modeLabel = " VISUAL "
+			modeLabelStyle = lipgloss.NewStyle().
+				Background(styles.Purple).
+				Foreground(styles.TextInverse).
+				Bold(true)
+		case VimModeCommand:
+			// Command mode: amber border - command input
+			borderColor = styles.FocusRingCommand
+			modeLabel = " COMMAND "
+			modeLabelStyle = lipgloss.NewStyle().
+				Background(styles.FocusRingCommand).
+				Foreground(styles.TextInverse).
+				Bold(true)
+		default:
+			borderColor = styles.FocusRing
+			modeLabel = ""
+		}
+	} else if m.input.Focused() {
+		// Non-vim mode, but input is focused
+		borderColor = styles.FocusRing
+		modeLabel = ""
+	} else {
+		// Input not focused
+		borderColor = styles.FocusRingDim
+		modeLabel = ""
+	}
+
+	// Render the mode label badge
+	var modeBadge string
+	if modeLabel != "" {
+		modeBadge = modeLabelStyle.Render(modeLabel)
+	}
+
+	// Create top border with mode indicator integrated
+	// Format: ─────[ INSERT ]─────────────────
+	borderChar := "\u2500" // Unicode horizontal line
+	if modeLabel != "" {
+		// Calculate border segments around mode label
+		labelWidth := lipgloss.Width(modeBadge)
+		leftBorderWidth := 3
+		rightBorderWidth := width - leftBorderWidth - labelWidth - 2
+		if rightBorderWidth < 0 {
+			rightBorderWidth = 0
+		}
+
+		leftBorder := lipgloss.NewStyle().
+			Foreground(borderColor).
+			Render(strings.Repeat(borderChar, leftBorderWidth))
+		rightBorder := lipgloss.NewStyle().
+			Foreground(borderColor).
+			Render(strings.Repeat(borderChar, rightBorderWidth))
+
+		modeBadge = leftBorder + modeBadge + rightBorder
+	} else {
+		// No mode label, just a colored border line
+		modeBadge = lipgloss.NewStyle().
+			Foreground(borderColor).
+			Render(strings.Repeat(borderChar, width))
+	}
 
 	// Input view - the textinput handles its own prompt
 	// In vim command mode, show command buffer instead
@@ -1075,19 +1252,41 @@ func (m Model) renderInput() string {
 	// Build input line content (no extra prompt - textinput has it)
 	inputContent := inputView + statusIndicator
 
+	// Add subtle left border indicator for vim mode
+	var leftIndicator string
+	if m.vimHandler != nil && m.vimHandler.Enabled() {
+		switch m.vimHandler.Mode() {
+		case VimModeInsert:
+			leftIndicator = lipgloss.NewStyle().
+				Foreground(styles.FocusRingInsert).
+				Render("\u2503 ") // Bold vertical bar
+		case VimModeNormal:
+			leftIndicator = lipgloss.NewStyle().
+				Foreground(styles.FocusRingDim).
+				Render("\u2502 ") // Light vertical bar
+		case VimModeCommand:
+			leftIndicator = lipgloss.NewStyle().
+				Foreground(styles.FocusRingCommand).
+				Render("\u2503 ") // Bold vertical bar
+		default:
+			leftIndicator = "  "
+		}
+	} else {
+		leftIndicator = "  "
+	}
+
 	inputLine := lipgloss.NewStyle().
 		Width(inputLineWidth).
-		Padding(0, 1).
-		Render(inputContent)
+		Render(leftIndicator + inputContent)
 
 	// Character count - right aligned, subtle
 	charCount := m.renderCharCount()
 
-	// Build the input area: separator, input line, char count (no trailing sep)
+	// Build the input area: mode border, input line, char count
 	// Use fixed height of 3 to prevent layout shift when typing
 	result := lipgloss.JoinVertical(
 		lipgloss.Left,
-		sep,
+		modeBadge,
 		inputLine,
 		charCount,
 	)
@@ -1558,7 +1757,8 @@ func (m Model) renderContextBarCompact() string {
 // HELP OVERLAY
 // =============================================================================
 
-// renderHelpOverlay renders the keyboard shortcuts help overlay.
+// renderHelpOverlay renders context-sensitive keyboard shortcuts help overlay.
+// Following lazygit's pattern, only shows keybindings that work in the current context.
 // This is displayed when the user presses '?' to toggle help.
 func (m Model) renderHelpOverlay() string {
 	width := m.width
@@ -1570,50 +1770,132 @@ func (m Model) renderHelpOverlay() string {
 		height = 24
 	}
 
-	// Get help items
-	helpItems := GetHelpItems()
+	// Determine the context that was active BEFORE help was shown
+	// When help opens, we show keys for the previous context (what user was doing)
+	var activeContext HelpContext
+	if m.searchMode {
+		activeContext = ContextSearch
+	} else if m.state == StateError {
+		activeContext = ContextError
+	} else if m.state == StateStreaming {
+		activeContext = ContextStreaming
+	} else if m.inputMode {
+		activeContext = ContextInput
+	} else {
+		activeContext = ContextNormal
+	}
+
+	// Get help items filtered by context and grouped by category
+	groupedItems := GetHelpItemsByCategory(activeContext)
+	categoryOrder := GetCategoryOrder()
 
 	// Build help content
 	var sb strings.Builder
-	sb.WriteString("Keyboard Shortcuts\n")
-	sb.WriteString(strings.Repeat("\u2500", 20) + "\n\n") // Unicode horizontal line
 
-	for _, item := range helpItems {
-		sb.WriteString(fmt.Sprintf("  %-18s %s\n", item.Key, item.Desc))
+	// Header with context indicator - styled to stand out
+	contextName := GetContextDisplayName(activeContext)
+	sb.WriteString(fmt.Sprintf("Keys available now (%s)\n", contextName))
+	sb.WriteString(strings.Repeat("\u2500", 35) + "\n\n") // Unicode horizontal line
+
+	// Render items grouped by category in preferred order
+	hasContent := false
+	for _, category := range categoryOrder {
+		items, exists := groupedItems[category]
+		if !exists || len(items) == 0 {
+			continue
+		}
+
+		hasContent = true
+		// Category header
+		categoryStyle := lipgloss.NewStyle().
+			Foreground(styles.Cyan).
+			Bold(true)
+		sb.WriteString(categoryStyle.Render(string(category)) + "\n")
+
+		// Items in this category
+		for _, item := range items {
+			keyStyle := lipgloss.NewStyle().Foreground(styles.Amber)
+			descStyle := lipgloss.NewStyle().Foreground(styles.TextMuted)
+			sb.WriteString(fmt.Sprintf("  %s  %s\n",
+				keyStyle.Render(fmt.Sprintf("%-14s", item.Key)),
+				descStyle.Render(item.Desc)))
+		}
+		sb.WriteString("\n")
 	}
 
-	// Add vim mode section
-	sb.WriteString("\nVim Navigation\n")
-	sb.WriteString(strings.Repeat("\u2500", 20) + "\n\n")
+	// Add vim mode section if vim is enabled and relevant to context
+	if m.vimHandler != nil && m.vimHandler.Enabled() {
+		vimItems := GetVimHelpItems()
+		var relevantVimItems []HelpItem
+		for _, item := range vimItems {
+			for _, ctx := range item.Contexts {
+				if ctx == activeContext {
+					relevantVimItems = append(relevantVimItems, item)
+					break
+				}
+			}
+		}
 
-	vimItems := GetVimHelpItems()
-	for _, item := range vimItems {
-		sb.WriteString(fmt.Sprintf("  %-18s %s\n", item.Key, item.Desc))
+		if len(relevantVimItems) > 0 {
+			categoryStyle := lipgloss.NewStyle().
+				Foreground(styles.Cyan).
+				Bold(true)
+			sb.WriteString(categoryStyle.Render("Vim") + "\n")
+
+			for _, item := range relevantVimItems {
+				keyStyle := lipgloss.NewStyle().Foreground(styles.Amber)
+				descStyle := lipgloss.NewStyle().Foreground(styles.TextMuted)
+				sb.WriteString(fmt.Sprintf("  %s  %s\n",
+					keyStyle.Render(fmt.Sprintf("%-14s", item.Key)),
+					descStyle.Render(item.Desc)))
+			}
+			sb.WriteString("\n")
+		}
 	}
 
-	// Add mode indicator
-	sb.WriteString("\nCurrent Mode\n")
-	sb.WriteString(strings.Repeat("\u2500", 20) + "\n\n")
-	if m.inputMode {
-		sb.WriteString("  Mode: INPUT (typing)\n")
-		sb.WriteString("  Press Esc to enter NORMAL mode\n")
-	} else {
-		sb.WriteString("  Mode: NORMAL (navigation)\n")
-		sb.WriteString("  Press i to enter INPUT mode\n")
+	// If no items for this context, show a helpful message
+	if !hasContent {
+		sb.WriteString("  No specific keybindings for this mode.\n\n")
 	}
 
-	if m.multiLineMode {
-		sb.WriteString("  Multi-line: ON (C-Enter to submit)\n")
-	} else {
-		sb.WriteString("  Multi-line: OFF (Enter to submit)\n")
+	// Current state indicator
+	sb.WriteString(strings.Repeat("\u2500", 35) + "\n")
+	stateStyle := lipgloss.NewStyle().Foreground(styles.TextMuted).Italic(true)
+
+	// Show current mode info
+	var modeInfo string
+	switch activeContext {
+	case ContextInput:
+		modeInfo = "Input mode - type your message"
+	case ContextNormal:
+		modeInfo = "Normal mode - navigate with j/k"
+	case ContextStreaming:
+		modeInfo = "Streaming - Esc or C-c to cancel"
+	case ContextSearch:
+		modeInfo = "Search mode - n/N to navigate"
+	case ContextError:
+		modeInfo = "Error - Esc or Enter to dismiss"
+	default:
+		modeInfo = "Press ? to toggle help"
+	}
+	sb.WriteString(stateStyle.Render(modeInfo) + "\n")
+
+	// Multi-line mode indicator if in input mode
+	if activeContext == ContextInput {
+		if m.multiLineMode {
+			sb.WriteString(stateStyle.Render("Multi-line: ON (C-Enter to send)") + "\n")
+		}
 	}
 
-	sb.WriteString("\n  Press ? or Esc to close help")
+	// Close hint
+	sb.WriteString("\n")
+	closeStyle := lipgloss.NewStyle().Foreground(styles.Overlay)
+	sb.WriteString(closeStyle.Render("Press ? or Esc to close"))
 
 	content := sb.String()
 
-	// Calculate overlay dimensions
-	contentWidth := 50
+	// Calculate overlay dimensions - slightly wider for better formatting
+	contentWidth := 55
 	if contentWidth > width-4 {
 		contentWidth = width - 4
 	}
@@ -1624,7 +1906,7 @@ func (m Model) renderHelpOverlay() string {
 		contentHeight = height - 4
 	}
 
-	// Create help box style
+	// Create help box style with subtle background
 	helpStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.Purple).

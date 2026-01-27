@@ -178,6 +178,10 @@ type Model struct {
 	// Background task system
 	taskQueue  *tasks.Queue  // Background task queue
 	taskRunner *tasks.Runner // Task runner for background execution
+
+	// Non-blocking error toasts (lazygit-inspired)
+	// Toasts appear in bottom-right corner and auto-dismiss without blocking UI
+	toastManager *components.ToastManager // Manages error/warning/info toasts
 }
 
 // SearchMatch represents a search match location.
@@ -291,6 +295,7 @@ func New(theme *styles.Theme) Model {
 		viewportOptimizer:     NewViewportOptimizer(),                // Feature 4.2: Reduce redundant viewport updates
 		lastStreamTick:        time.Now(),                            // Feature 4.2: Last streaming tick timestamp
 		vimHandler:             vimHandler, // Vim mode handler
+		toastManager:           components.NewToastManager(), // Non-blocking error toasts
 	}
 }
 
@@ -488,6 +493,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case VimCommandMsg:
 		return m.handleVimCommand(msg)
+
+	case components.ToastTickMsg:
+		return m.handleToastTick(msg)
+
+	case components.ToastDismissMsg:
+		return m.handleToastDismiss(msg)
+
+	case components.ToastAddMsg:
+		return m.handleToastAdd(msg)
 
 	default:
 		// For any unhandled messages, update the text input if ready
@@ -730,7 +744,21 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// ==========================================================================
-	// ERROR STATE HANDLING
+	// TOAST DISMISSAL (non-blocking, works in any state)
+	// ==========================================================================
+
+	// Handle 'x' key to dismiss the oldest toast (when toasts are visible)
+	if keyStr == "x" && m.HasToasts() {
+		toasts := m.GetToasts()
+		if len(toasts) > 0 {
+			// Dismiss the first (oldest) toast
+			m.DismissToast(toasts[0].ID)
+			return m, nil
+		}
+	}
+
+	// ==========================================================================
+	// ERROR STATE HANDLING (blocking errors - kept for critical errors only)
 	// ==========================================================================
 
 	if m.state == StateError {
@@ -1292,7 +1320,7 @@ func (m Model) handleStreamError(msg StreamErrorMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	m.state = StateError
+	// Reset streaming state
 	m.isThinking = false
 	m.streamingMsgID = ""
 	m.streamingStats = nil
@@ -1302,14 +1330,22 @@ func (m Model) handleStreamError(msg StreamErrorMsg) (tea.Model, tea.Cmd) {
 	m.pendingQuery = ""
 	m.pendingMsgID = ""
 
-	// Use smart error pattern matching for better suggestions
-	errMsg := SmartErrorMsg("Streaming Error", msg.Error.Error())
-	m.lastError = &errMsg
-
 	// Store error for @error mention retrieval
 	ctxmention.StoreLastError("Streaming Error: " + msg.Error.Error())
 
-	// Pre-focus input so it's ready when error is dismissed
+	// Use NON-BLOCKING toast instead of blocking StateError
+	// This allows user to continue scrolling/reading while error is shown
+	if m.toastManager != nil {
+		m.toastManager.AddError("Streaming Error: " + msg.Error.Error())
+		m.state = StateReady // Stay in ready state, don't block
+		m.input.Focus()
+		return m, tea.Batch(textinput.Blink, components.ToastTickCmd())
+	}
+
+	// Fallback to blocking error for critical errors (toast manager not initialized)
+	errMsg := SmartErrorMsg("Streaming Error", msg.Error.Error())
+	m.lastError = &errMsg
+	m.state = StateError
 	m.input.Focus()
 
 	return m, nil
@@ -1347,21 +1383,36 @@ func (m Model) handleOllamaStatus(msg OllamaStatusMsg) (tea.Model, tea.Cmd) {
 			errText = msg.Error.Error()
 		}
 
-		// Use smart error pattern matching
-		errMsg := SmartErrorMsg("Ollama Not Running", errText)
-		m.lastError = &errMsg
-		m.state = StateError
-
 		// Store error for @error mention retrieval
 		fullErrText := "Ollama Not Running: " + errText
 		ctxmention.StoreLastError(fullErrText)
+
+		// Use NON-BLOCKING toast - user can still use cloud mode or read docs
+		if m.toastManager != nil {
+			m.toastManager.AddWarning("Ollama: " + errText)
+			return m, components.ToastTickCmd()
+		}
+
+		// Fallback to blocking error
+		errMsg := SmartErrorMsg("Ollama Not Running", errText)
+		m.lastError = &errMsg
+		m.state = StateError
 	}
 	return m, nil
 }
 
 func (m Model) handleOllamaModels(msg OllamaModelsMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
-		// Use smart error pattern matching
+		// Store error for @error mention retrieval
+		ctxmention.StoreLastError("Failed to List Models: " + msg.Error.Error())
+
+		// Use NON-BLOCKING toast
+		if m.toastManager != nil {
+			m.toastManager.AddError("Failed to list models: " + msg.Error.Error())
+			return m, components.ToastTickCmd()
+		}
+
+		// Fallback to blocking error
 		errMsg := SmartErrorMsg("Failed to List Models", msg.Error.Error())
 		m.lastError = &errMsg
 		m.state = StateError
@@ -1371,7 +1422,16 @@ func (m Model) handleOllamaModels(msg OllamaModelsMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleModelSwitched(msg OllamaModelSwitchedMsg) (tea.Model, tea.Cmd) {
 	if msg.Error != nil {
-		// Use smart error pattern matching
+		// Store error for @error mention retrieval
+		ctxmention.StoreLastError("Failed to Switch Model: " + msg.Error.Error())
+
+		// Use NON-BLOCKING toast
+		if m.toastManager != nil {
+			m.toastManager.AddError("Failed to switch model: " + msg.Error.Error())
+			return m, components.ToastTickCmd()
+		}
+
+		// Fallback to blocking error
 		errMsg := SmartErrorMsg("Failed to Switch Model", msg.Error.Error())
 		m.lastError = &errMsg
 		m.state = StateError
@@ -1630,6 +1690,44 @@ func (m *Model) SetConversation(conv *model.Conversation) {
 // GetState returns the current state.
 func (m *Model) GetState() State {
 	return m.state
+}
+
+// GetCurrentContext returns the current UI context for context-sensitive help.
+// This determines which keybindings are shown in the help overlay, following
+// lazygit's pattern of showing only currently-active bindings.
+func (m *Model) GetCurrentContext() HelpContext {
+	// Priority order: overlays first, then mode-specific contexts
+
+	// Check for overlay states first
+	if m.showHelp {
+		return ContextHelp
+	}
+	if m.commandPalette != nil && m.commandPalette.IsVisible() {
+		return ContextPalette
+	}
+
+	// Check for search mode
+	if m.searchMode {
+		return ContextSearch
+	}
+
+	// Check for error state
+	if m.state == StateError {
+		return ContextError
+	}
+
+	// Check for streaming state
+	if m.state == StateStreaming {
+		return ContextStreaming
+	}
+
+	// Ready state - check input mode
+	if m.inputMode {
+		return ContextInput
+	}
+
+	// Default: normal navigation mode
+	return ContextNormal
 }
 
 // GetModelName returns the current model name.
@@ -2590,4 +2688,122 @@ func (m Model) handleVimCommand(msg VimCommandMsg) (tea.Model, tea.Cmd) {
 // GetVimHandler returns the vim handler (for rendering mode indicator)
 func (m *Model) GetVimHandler() *VimHandler {
 	return m.vimHandler
+}
+
+// =============================================================================
+// NON-BLOCKING ERROR TOAST HANDLERS (lazygit-inspired)
+// =============================================================================
+
+// handleToastTick processes toast tick messages - removes expired toasts.
+func (m Model) handleToastTick(msg components.ToastTickMsg) (tea.Model, tea.Cmd) {
+	if m.toastManager == nil {
+		return m, nil
+	}
+
+	// Tick the toast manager to remove expired toasts
+	toasts := m.toastManager.TickToasts()
+
+	// If there are still toasts, continue ticking
+	if len(toasts) > 0 {
+		return m, components.ToastTickCmd()
+	}
+
+	return m, nil
+}
+
+// handleToastDismiss handles manual toast dismissal (e.g., user pressed 'x').
+func (m Model) handleToastDismiss(msg components.ToastDismissMsg) (tea.Model, tea.Cmd) {
+	if m.toastManager == nil {
+		return m, nil
+	}
+
+	m.toastManager.RemoveToast(msg.ID)
+	return m, nil
+}
+
+// handleToastAdd handles adding a new toast via message.
+func (m Model) handleToastAdd(msg components.ToastAddMsg) (tea.Model, tea.Cmd) {
+	if m.toastManager == nil {
+		return m, nil
+	}
+
+	switch msg.Kind {
+	case components.ToastKindError:
+		m.toastManager.AddError(msg.Message)
+	case components.ToastKindWarning:
+		m.toastManager.AddWarning(msg.Message)
+	case components.ToastKindSuccess:
+		m.toastManager.AddSuccess(msg.Message)
+	default:
+		m.toastManager.AddStatus(msg.Message)
+	}
+
+	return m, components.ToastTickCmd()
+}
+
+// AddErrorToast adds an error toast (non-blocking).
+// Use this instead of setting StateError for recoverable errors.
+func (m *Model) AddErrorToast(message string) tea.Cmd {
+	if m.toastManager == nil {
+		return nil
+	}
+	m.toastManager.AddError(message)
+	return components.ToastTickCmd()
+}
+
+// AddWarningToast adds a warning toast (non-blocking).
+func (m *Model) AddWarningToast(message string) tea.Cmd {
+	if m.toastManager == nil {
+		return nil
+	}
+	m.toastManager.AddWarning(message)
+	return components.ToastTickCmd()
+}
+
+// AddStatusToast adds a status/info toast (non-blocking).
+func (m *Model) AddStatusToast(message string) tea.Cmd {
+	if m.toastManager == nil {
+		return nil
+	}
+	m.toastManager.AddStatus(message)
+	return components.ToastTickCmd()
+}
+
+// AddSuccessToast adds a success toast (non-blocking).
+func (m *Model) AddSuccessToast(message string) tea.Cmd {
+	if m.toastManager == nil {
+		return nil
+	}
+	m.toastManager.AddSuccess(message)
+	return components.ToastTickCmd()
+}
+
+// DismissToast dismisses a toast by ID.
+func (m *Model) DismissToast(id int) {
+	if m.toastManager != nil {
+		m.toastManager.RemoveToast(id)
+	}
+}
+
+// GetToasts returns the current toasts (for rendering).
+func (m *Model) GetToasts() []components.ErrorToast {
+	if m.toastManager == nil {
+		return nil
+	}
+	return m.toastManager.GetToasts()
+}
+
+// HasToasts returns true if there are any active toasts.
+func (m *Model) HasToasts() bool {
+	if m.toastManager == nil {
+		return false
+	}
+	return m.toastManager.HasToasts()
+}
+
+// ClearToasts removes all toasts.
+func (m *Model) ClearToasts() {
+	if m.toastManager != nil {
+		m.toastManager.Clear()
+	}
 }
